@@ -31,7 +31,7 @@ services:
       ADMIN_COOKIE_SECRET: ${ADMIN_COOKIE_SECRET}
       ADMIN_PORT: ${ADMIN_PORT:-3000}
     ports:
-      - "${ADMIN_PORT:-3000}:3000"
+      - "${ADMIN_PORT:-3000}:${ADMIN_PORT:-3000}"
 
 volumes:
   postgres_data:
