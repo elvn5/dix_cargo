@@ -230,10 +230,15 @@ export function createAdminApp() {
     const body = `
       <div class="card stat-card">
         <div class="card-header bg-white d-flex align-items-center justify-content-between gap-2 flex-wrap">
-          <span class="fw-semibold">Пользователи <span class="badge bg-secondary">${total}</span></span>
+          <div class="d-flex align-items-center gap-2">
+            <span class="fw-semibold">Пользователи <span class="badge bg-secondary">${total}</span></span>
+            <a href="/admin/users/new" class="btn btn-sm btn-primary">
+              <i class="bi bi-plus-lg"></i> Добавить
+            </a>
+          </div>
           <form method="GET" class="d-flex gap-2">
             <input name="q" value="${q}" class="form-control form-control-sm" placeholder="Поиск по имени, телефону, коду..." style="width:280px"/>
-            <button class="btn btn-sm btn-primary">Найти</button>
+            <button class="btn btn-sm btn-outline-secondary">Найти</button>
             ${q ? `<a href="/admin/users" class="btn btn-sm btn-outline-secondary">Сбросить</a>` : ""}
           </form>
         </div>
@@ -249,6 +254,89 @@ export function createAdminApp() {
       </div>`;
 
     res.send(layout("Пользователи", body, "/admin/users"));
+  });
+
+  // ── Create user ────────────────────────────────────────────────────────────
+
+  app.get("/admin/users/new", requireAuth, (_req, res) => {
+    const body = `
+      <div class="row">
+        <div class="col-lg-6">
+          <div class="card stat-card p-4">
+            <form method="POST" action="/admin/users/new">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">ФИО</label>
+                <input name="full_name" class="form-control" required placeholder="Иванов Иван Иванович"/>
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Телефон</label>
+                <input name="phone" class="form-control" required placeholder="996700000000"/>
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold">
+                  Персональный КОД
+                  <span class="text-muted fw-normal">(оставьте пустым — сгенерируется автоматически)</span>
+                </label>
+                <input name="client_code" class="form-control" placeholder="DIX-001"/>
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Пароль</label>
+                <input name="password" type="text" class="form-control" required/>
+              </div>
+              <div class="mb-4">
+                <label class="form-label fw-semibold">Telegram ID
+                  <span class="text-muted fw-normal">(необязательно)</span>
+                </label>
+                <input name="telegram_id" type="number" class="form-control" placeholder="123456789"/>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-primary fw-semibold">
+                  <i class="bi bi-person-plus"></i> Создать
+                </button>
+                <a href="/admin/users" class="btn btn-outline-secondary">Отмена</a>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>`;
+
+    res.send(layout("Новый пользователь", body, "/admin/users"));
+  });
+
+  app.post("/admin/users/new", requireAuth, async (req, res) => {
+    const { full_name, phone, password, client_code, telegram_id } =
+      req.body as Record<string, string>;
+
+    const { createHash } = await import("crypto");
+    const passwordHash = createHash("sha256").update(password.trim()).digest("hex");
+
+    let code = client_code?.trim();
+    if (!code) {
+      const lastUser = await prisma.user.findFirst({
+        orderBy: { id: "desc" },
+        select: { client_code: true },
+      });
+      const lastNumber = lastUser
+        ? parseInt(lastUser.client_code.split("-")[1] ?? "0", 10)
+        : 0;
+      code = `DIX-${String(lastNumber + 1).padStart(3, "0")}`;
+    }
+
+    const tgId = telegram_id?.trim()
+      ? BigInt(telegram_id.trim())
+      : BigInt(Date.now()) * -1n;
+
+    const newUser = await prisma.user.create({
+      data: {
+        full_name: full_name.trim(),
+        phone: phone.trim(),
+        password: passwordHash,
+        client_code: code,
+        telegram_id: tgId,
+      },
+    });
+
+    res.redirect(`/admin/users/${newUser.id}?saved=1`);
   });
 
   // ── User detail / edit ─────────────────────────────────────────────────────
