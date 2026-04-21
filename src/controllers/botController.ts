@@ -1,0 +1,434 @@
+import { Bot, Context } from "grammy";
+import { userService } from "../services/userService";
+
+type RegStep =
+  | { step: "phone" }
+  | { step: "name"; phone: string }
+  | { step: "password"; phone: string; fullName: string }
+  | { step: "confirm"; phone: string; fullName: string; password: string };
+
+const regState = new Map<number, RegStep>();
+
+const MENU_KEYBOARD = {
+  keyboard: [
+    [{ text: "📦 Мои посылки" }, { text: "🚫 Запрещенные товары" }],
+    [{ text: "📍 Адреса" }, { text: "👤 Профиль" }],
+    [{ text: "💬 Поддержка" }, { text: "📋 Шаблон заполнения" }],
+  ],
+  resize_keyboard: true,
+  persistent: true,
+};
+
+const COMPANY_INFO =
+  `📍 Номер: +996 550‒86‒74‒14\n` +
+  `📍 Часы работы: С 9:00-19:00\nОбед 13:00-14:00`;
+
+function buildProfile(code: string, fullName: string, phone: string): string {
+  return (
+    `✅ Вы успешно зарегистрированы\n\n` +
+    `📃 Ваш профиль\n\n` +
+    `🪪 Персональный КОД: <b>${code}</b>\n` +
+    `👤 ФИО: ${fullName}\n` +
+    `📞 Номер: ${phone}` +
+    COMPANY_INFO
+  );
+}
+
+export function registerControllers(bot: Bot<Context>): void {
+  // ── /start ──────────────────────────────────────────────────────────────────
+  bot.command("start", async (ctx) => {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const existingUser = await userService.findUserByTelegramId(
+      BigInt(telegramId)
+    );
+
+    if (existingUser) {
+      await ctx.reply(
+        buildProfile(
+          existingUser.client_code,
+          existingUser.full_name,
+          existingUser.phone
+        ),
+        {
+          parse_mode: "HTML",
+          reply_markup: MENU_KEYBOARD,
+        }
+      );
+      return;
+    }
+
+    regState.set(telegramId, { step: "phone" });
+
+    await ctx.reply(
+      "👋 Добро пожаловать!\n\nДля регистрации нажмите кнопку ниже и поделитесь своим номером телефона.",
+      {
+        reply_markup: {
+          keyboard: [
+            [{ text: "📱 Поделиться контактом", request_contact: true }],
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: true,
+        },
+      }
+    );
+  });
+
+  // ── Команды меню ─────────────────────────────────────────────────────────────
+  bot.command("packages", (ctx) => handlePackages(ctx));
+  bot.command("forbidden", (ctx) => handleForbidden(ctx));
+  bot.command("addresses", (ctx) => handleAddresses(ctx));
+  bot.command("profile", (ctx) => handleProfile(ctx));
+  bot.command("support", (ctx) => handleSupport(ctx));
+  bot.command("template", (ctx) => handleTemplate(ctx));
+
+  // ── Callback-кнопки ───────────────────────────────────────────────────────────
+  // ── Шаблоны маркетплейсов ────────────────────────────────────────────────────
+  const TEMPLATE =
+    "ФИО получателя: \n" +
+    "Номер телефона: \n" +
+    "Адрес доставки: \n" +
+    "Описание товара: \n" +
+    "Примерный вес (кг): \n" +
+    "Трек-номер (если есть): ";
+
+  bot.callbackQuery("template_pinduoduo", async (ctx) => {
+    await ctx.answerCallbackQuery();
+
+    await ctx.reply(
+      `📩 Скопируйте ниже адрес склада:\n\n` +
+      `<code>ТУТ ДОЛЖЕН БЫТЬ АДРЕС СКЛАДА</code>\n\n` +
+      `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже\n` +
+      `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n\n` +
+      `Только после подтверждения адреса, Dix Cargo несет ответственность за ваши посылки 📦`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "💬 Связаться с менеджером", url: "https://wa.me/996550867414" }],
+          ],
+        },
+      }
+    );
+
+    await ctx.reply("📖 Инструкция по заполнению маркетплейсов:", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Pinduoduo", callback_data: "instruction_pinduoduo" }],
+          [{ text: "Taobao",    callback_data: "instruction_taobao" }],
+          [{ text: "1688",      callback_data: "instruction_1688" }],
+        ],
+      },
+    });
+  });
+
+  bot.callbackQuery("template_taobao", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`📋 <b>Шаблон — Taobao</b>\n\n<code>${TEMPLATE}</code>`, { parse_mode: "HTML" });
+  });
+
+  bot.callbackQuery("template_1688", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`📋 <b>Шаблон — 1688</b>\n\n<code>${TEMPLATE}</code>`, { parse_mode: "HTML" });
+  });
+
+  // ── Инструкции маркетплейсов ─────────────────────────────────────────────────
+  bot.callbackQuery("instruction_pinduoduo", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("📖 <b>Инструкция — Pinduoduo</b>\n\nСкоро здесь появится инструкция.", { parse_mode: "HTML" });
+  });
+
+  bot.callbackQuery("instruction_taobao", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("📖 <b>Инструкция — Taobao</b>\n\nСкоро здесь появится инструкция.", { parse_mode: "HTML" });
+  });
+
+  bot.callbackQuery("instruction_1688", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("📖 <b>Инструкция — 1688</b>\n\nСкоро здесь появится инструкция.", { parse_mode: "HTML" });
+  });
+
+  bot.callbackQuery("packages_office", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("🏢 <b>Посылки в офисе</b>\n\nНет посылок со статусом «В офисе».", { parse_mode: "HTML" });
+  });
+
+  bot.callbackQuery("packages_transit", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("🚚 <b>Посылки в пути</b>\n\nНет посылок со статусом «В пути».", { parse_mode: "HTML" });
+  });
+
+  // ── Контакт ──────────────────────────────────────────────────────────────────
+  bot.on("message:contact", async (ctx) => {
+    const contact = ctx.message.contact;
+    const senderId = ctx.from?.id;
+
+    if (!senderId || contact.user_id !== senderId) {
+      await ctx.reply(
+        "❌ Пожалуйста, поделитесь своим собственным контактом.",
+        {
+          reply_markup: { remove_keyboard: true },
+        }
+      );
+      return;
+    }
+
+    const state = regState.get(senderId);
+    if (!state || state.step !== "phone") {
+      await ctx.reply("Отправьте /start для начала регистрации.", {
+        reply_markup: { remove_keyboard: true },
+      });
+      return;
+    }
+
+    regState.set(senderId, { step: "name", phone: contact.phone_number });
+
+    await ctx.reply("📝 Введите ваше ФИО (Фамилия Имя Отчество):", {
+      reply_markup: { remove_keyboard: true },
+    });
+  });
+
+  // ── Текстовые сообщения ───────────────────────────────────────────────────────
+  bot.on("message:text", async (ctx) => {
+    const senderId = ctx.from?.id;
+    if (!senderId) return;
+
+    const text = ctx.message.text.trim();
+
+    // Кнопки меню (проверяем до состояния регистрации)
+    if (text === "📦 Мои посылки") {
+      await handlePackages(ctx);
+      return;
+    }
+    if (text === "🚫 Запрещенные товары") {
+      await handleForbidden(ctx);
+      return;
+    }
+    if (text === "📍 Адреса") {
+      await handleAddresses(ctx);
+      return;
+    }
+    if (text === "👤 Профиль") {
+      await handleProfile(ctx);
+      return;
+    }
+    if (text === "💬 Поддержка") {
+      await handleSupport(ctx);
+      return;
+    }
+    if (text === "📋 Шаблон заполнения") {
+      await handleTemplate(ctx);
+      return;
+    }
+
+    // Шаги регистрации
+    const state = regState.get(senderId);
+    if (!state) {
+      await ctx.reply("Отправьте /start для начала работы.");
+      return;
+    }
+
+    if (state.step === "name") {
+      if (text.split(" ").length < 2) {
+        await ctx.reply(
+          "⚠️ Пожалуйста, введите полное ФИО (минимум фамилия и имя)."
+        );
+        return;
+      }
+      regState.set(senderId, {
+        step: "password",
+        phone: state.phone,
+        fullName: text,
+      });
+      await ctx.reply("🔒 Придумайте пароль:");
+      return;
+    }
+
+    if (state.step === "password") {
+      if (text.length < 6) {
+        await ctx.reply("⚠️ Пароль должен содержать не менее 6 символов.");
+        return;
+      }
+      regState.set(senderId, {
+        step: "confirm",
+        phone: state.phone,
+        fullName: state.fullName,
+        password: text,
+      });
+      await ctx.reply("🔒 Повторите пароль:");
+      return;
+    }
+
+    if (state.step === "confirm") {
+      if (text !== state.password) {
+        await ctx.reply("❌ Пароли не совпадают. Введите пароль заново:");
+        regState.set(senderId, {
+          step: "password",
+          phone: state.phone,
+          fullName: state.fullName,
+        });
+        return;
+      }
+
+      regState.delete(senderId);
+
+      try {
+        const existingUser = await userService.findUserByTelegramId(
+          BigInt(senderId)
+        );
+
+        if (existingUser) {
+          await ctx.reply(
+            buildProfile(
+              existingUser.client_code,
+              existingUser.full_name,
+              existingUser.phone
+            ),
+            {
+              parse_mode: "HTML",
+              reply_markup: MENU_KEYBOARD,
+            }
+          );
+          return;
+        }
+
+        const newUser = await userService.createUser(
+          BigInt(senderId),
+          state.phone,
+          state.fullName,
+          state.password
+        );
+
+        await ctx.reply(
+          buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
+          {
+            parse_mode: "HTML",
+            reply_markup: MENU_KEYBOARD,
+          }
+        );
+      } catch (error) {
+        console.error(
+          "[Registration] Ошибка при создании пользователя:",
+          error
+        );
+        await ctx.reply(
+          "⚠️ Произошла ошибка при регистрации. Попробуйте позже."
+        );
+      }
+    }
+  });
+}
+
+// ── Обработчики кнопок меню ───────────────────────────────────────────────────
+
+async function handlePackages(ctx: Context) {
+  await ctx.reply("📦 <b>Мои посылки</b>\n\nВыберите статус:", {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "🏢 В Офисе", callback_data: "packages_office" },
+          { text: "🚚 В пути",  callback_data: "packages_transit" },
+        ],
+      ],
+    },
+  });
+}
+
+async function handleForbidden(ctx: Context) {
+  await ctx.reply(
+    "📌 <b>Список запрещённых к перевозке грузов:</b>\n\n" +
+      "1. Лекарственные препараты, наркотические и психотропные вещества;\n" +
+      "2. Легковоспламеняющиеся, взрывчатые и едкие вещества (фейерверки, газы в баллонах и т.п.);\n" +
+      "3. Охотничьи ножи (кухонные-бытовые можно);\n" +
+      "4. Оружие, наручники и его имитация;\n" +
+      "5. Предметы военного характера и одежда;\n" +
+      "6. Дроны, квадрокоптеры;\n" +
+      "7. Электронные сигареты, табачные изделия;\n" +
+      "8. Драгоценные металлы и камни;\n" +
+      "9. Меха, антиквариат и валютные ценности;\n" +
+      "10. Большие зеркала;\n" +
+      "11. Живые существа.\n\n" +
+      "❗️ Если у вас есть сомнения по поводу заказа какого-либо товара — напишите нам. Мы предоставим информацию о возможности его доставки.\n\n" +
+      "⚠️ Эти товары запрещены к перевозке в соответствии с таможенными правилами.\n" +
+      "В случае заказа указанных товаров предусмотрен штраф в размере 10 000 – 50 000 сом.",
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 Связаться с менеджером", url: "https://wa.me/996550867414" }],
+        ],
+      },
+    }
+  );
+}
+
+async function handleAddresses(ctx: Context) {
+  await ctx.reply(
+    "📍 <b>Наши адреса</b>\n\n" +
+      "<b>Бишкек:</b>\n" +
+      "🏡 ул. Айбек-Ата, 1/2\n" +
+      "📞 +996 550‒86‒74‒14\n" +
+      "🕐 Пн–Сб: 9:00–19:00 (обед 13:00–14:00)",
+    { parse_mode: "HTML" }
+  );
+}
+
+async function handleProfile(ctx: Context) {
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+
+  const user = await userService.findUserByTelegramId(BigInt(telegramId));
+
+  if (!user) {
+    await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
+    return;
+  }
+
+  await ctx.reply(
+    `📃 <b>Ваш профиль</b>\n\n` +
+      `🪪 Персональный КОД: <b>${user.client_code}</b>\n` +
+      `👤 ФИО: ${user.full_name}\n` +
+      `📞 Номер: ${user.phone}`,
+    { parse_mode: "HTML" }
+  );
+}
+
+async function handleSupport(ctx: Context) {
+  await ctx.reply(
+    "💬 <b>Поддержка</b>\n\nСвяжитесь с нами любым удобным способом:",
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: "💬 WhatsApp: +996550867414",
+              url: "https://wa.me/996550867414",
+            },
+          ],
+          [
+            {
+              text: "📸 Instagram: dix_cargo",
+              url: "https://www.instagram.com/dix_cargo/",
+            },
+          ],
+          [{ text: "✈️ Telegram канал", url: "https://t.me/dixcargo" }],
+        ],
+      },
+    }
+  );
+}
+
+async function handleTemplate(ctx: Context) {
+  await ctx.reply("🛍 Выберите маркетплейс:", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "Pinduoduo", callback_data: "template_pinduoduo" }],
+        [{ text: "Taobao",    callback_data: "template_taobao" }],
+        [{ text: "1688",      callback_data: "template_1688" }],
+      ],
+    },
+  });
+}
