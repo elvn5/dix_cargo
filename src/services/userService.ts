@@ -3,20 +3,16 @@ import type { User } from "@prisma/client";
 import { createHash } from "crypto";
 
 async function generateClientCode(): Promise<string> {
-  const lastUser = await prisma.user.findFirst({
-    orderBy: { id: "desc" },
+  const allCodes = await prisma.user.findMany({
     select: { client_code: true },
   });
 
-  let nextNumber = 1;
+  const maxNumber = allCodes.reduce((max, u) => {
+    const n = parseInt(u.client_code.split("-")[1] ?? "0", 10);
+    return n > max ? n : max;
+  }, 0);
 
-  if (lastUser) {
-    const parts = lastUser.client_code.split("-");
-    const lastNumber = parseInt(parts[1] ?? "0", 10);
-    nextNumber = lastNumber + 1;
-  }
-
-  const paddedNumber = String(nextNumber).padStart(3, "0");
+  const paddedNumber = String(maxNumber + 1).padStart(3, "0");
   return `DIX-${paddedNumber}`;
 }
 

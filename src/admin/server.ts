@@ -313,14 +313,12 @@ export function createAdminApp() {
 
     let code = client_code?.trim();
     if (!code) {
-      const lastUser = await prisma.user.findFirst({
-        orderBy: { id: "desc" },
-        select: { client_code: true },
-      });
-      const lastNumber = lastUser
-        ? parseInt(lastUser.client_code.split("-")[1] ?? "0", 10)
-        : 0;
-      code = `DIX-${String(lastNumber + 1).padStart(3, "0")}`;
+      const allCodes = await prisma.user.findMany({ select: { client_code: true } });
+      const maxNumber = allCodes.reduce((max, u) => {
+        const n = parseInt(u.client_code.split("-")[1] ?? "0", 10);
+        return n > max ? n : max;
+      }, 0);
+      code = `DIX-${String(maxNumber + 1).padStart(3, "0")}`;
     }
 
     const tgId = telegram_id?.trim()
