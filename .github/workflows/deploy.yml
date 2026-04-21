@@ -1,0 +1,151 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # ── Staging (main branch) ───────────────────────────────────────────────────
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
+    name: Deploy → Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image (staging)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ env.IMAGE }}:staging
+
+      - name: Copy compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: docker-compose.prod.yml
+          target: /opt/cargo_bot_staging
+
+      - name: Deploy staging on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            set -e
+            cd /opt/cargo_bot_staging
+
+            cat > .env <<EOF
+            BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+            POSTGRES_USER=cargo_user
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=cargo_bot_staging
+            DATABASE_URL=postgresql://cargo_user:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/cargo_bot_staging
+            ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}
+            ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+            ADMIN_COOKIE_SECRET=${{ secrets.ADMIN_COOKIE_SECRET }}
+            ADMIN_PORT=3001
+            IMAGE=${{ env.IMAGE }}:staging
+            EOF
+
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            docker compose -p cargo_staging -f docker-compose.prod.yml pull
+            docker compose -p cargo_staging -f docker-compose.prod.yml up -d
+            docker image prune -f
+
+  # ── Production (release/X.X.X branch) ─────────────────────────────────────
+  deploy-production:
+    if: startsWith(github.ref, 'refs/heads/release/')
+    name: Deploy → Production
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract release version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/heads/release/}" >> $GITHUB_OUTPUT
+
+      - name: Build and push image (production)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.version.outputs.VERSION }}
+
+      - name: Copy compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: docker-compose.prod.yml
+          target: /opt/cargo_bot_prod
+
+      - name: Deploy production on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            set -e
+            cd /opt/cargo_bot_prod
+
+            cat > .env <<EOF
+            BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+            POSTGRES_USER=cargo_user
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=cargo_bot_prod
+            DATABASE_URL=postgresql://cargo_user:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/cargo_bot_prod
+            ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}
+            ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+            ADMIN_COOKIE_SECRET=${{ secrets.ADMIN_COOKIE_SECRET }}
+            ADMIN_PORT=3000
+            IMAGE=${{ env.IMAGE }}:latest
+            EOF
+
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            docker compose -p cargo_prod -f docker-compose.prod.yml pull
+            docker compose -p cargo_prod -f docker-compose.prod.yml up -d
+            docker image prune -f
