@@ -61,6 +61,9 @@ RUN npx prisma generate
 # Копируем скомпилированный JS из builder-стадии
 COPY --from=builder /app/dist ./dist
 
+# Копируем статические файлы (фото, видео для бота)
+COPY src/assets ./dist/assets
+
 # Скрипт запуска: сначала мигрируем, потом стартуем бота
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
