@@ -62,8 +62,14 @@ export function registerControllers(bot: Bot<Context>): void {
     regState.set(telegramId, { step: "phone" });
 
     await ctx.reply(
-      "👋 Добро пожаловать!\n\nДля регистрации нажмите кнопку ниже и поделитесь своим номером телефона.",
+      "👋 Добро пожаловать!\n\n" +
+        "Для регистрации укажите номер телефона одним из способов:\n\n" +
+        "• Нажмите кнопку «📱 Поделиться контактом»\n" +
+        "• Или введите номер вручную в формате <b>XXX123456</b>\n" +
+        "  где XXX — код оператора\n" +
+        "  Пример: <code>500100500</code>",
       {
+        parse_mode: "HTML",
         reply_markup: {
           keyboard: [
             [{ text: "📱 Поделиться контактом", request_contact: true }],
@@ -226,6 +232,23 @@ export function registerControllers(bot: Bot<Context>): void {
     const state = regState.get(senderId);
     if (!state) {
       await ctx.reply("Отправьте /start для начала работы.");
+      return;
+    }
+
+    if (state.step === "phone") {
+      if (!/^\d{9}$/.test(text)) {
+        await ctx.reply(
+          "⚠️ Неверный формат номера.\n\n" +
+            "Введите 9 цифр в формате <b>XXX123456</b>, где XXX — код оператора.\n" +
+            "Пример: <code>500100500</code>",
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+      regState.set(senderId, { step: "name", phone: text });
+      await ctx.reply("📝 Введите ваше ФИО (Фамилия Имя Отчество):", {
+        reply_markup: { remove_keyboard: true },
+      });
       return;
     }
 
