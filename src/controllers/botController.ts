@@ -1,5 +1,6 @@
-import { Bot, Context } from "grammy";
+import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
+import path from "path";
 
 type RegStep =
   | { step: "phone" }
@@ -62,8 +63,14 @@ export function registerControllers(bot: Bot<Context>): void {
     regState.set(telegramId, { step: "phone" });
 
     await ctx.reply(
-      "👋 Добро пожаловать!\n\nДля регистрации нажмите кнопку ниже и поделитесь своим номером телефона.",
+      "👋 Добро пожаловать!\n\n" +
+        "Для регистрации укажите номер телефона одним из способов:\n\n" +
+        "• Нажмите кнопку «📱 Поделиться контактом»\n" +
+        "• Или введите номер вручную в формате <b>XXX123456</b>\n" +
+        "  где XXX — код оператора\n" +
+        "  Пример: <code>500100500</code>",
       {
+        parse_mode: "HTML",
         reply_markup: {
           keyboard: [
             [{ text: "📱 Поделиться контактом", request_contact: true }],
@@ -159,6 +166,45 @@ export function registerControllers(bot: Bot<Context>): void {
     await ctx.reply("🚚 <b>Посылки в пути</b>\n\nНет посылок со статусом «В пути».", { parse_mode: "HTML" });
   });
 
+  // ── Адрес Pinduoduo ───────────────────────────────────────────────────────────
+  bot.callbackQuery("address_pinduoduo", async (ctx) => {
+    await ctx.answerCallbackQuery();
+
+    const telegramId = ctx.from?.id;
+    const user = telegramId
+      ? await userService.findUserByTelegramId(BigInt(telegramId))
+      : null;
+    const code = user?.client_code ?? "????";
+
+    const addressLines =
+      `八 ${code}\n` +
+      `广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n` +
+      `13763369694 八${code}`;
+
+    const infoText =
+      `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+      `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+      `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`;
+
+    await ctx.reply(`<code>${addressLines}</code>\n\n${infoText}`, {
+      parse_mode: "HTML",
+    });
+
+    const photoPath = path.join(__dirname, "../assets/pinduoduo_photo.jpg");
+    await ctx.replyWithPhoto(new InputFile(photoPath));
+
+    const videoPath = path.join(__dirname, "../assets/pinduoduo_video.MP4");
+    await ctx.replyWithVideo(new InputFile(videoPath));
+
+    await ctx.reply("📩 Готово? Отправьте скриншот на проверку:", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📩 Отправить на проверку", url: "https://wa.me/996550867414" }],
+        ],
+      },
+    });
+  });
+
   // ── Контакт ──────────────────────────────────────────────────────────────────
   bot.on("message:contact", async (ctx) => {
     const contact = ctx.message.contact;
@@ -226,6 +272,23 @@ export function registerControllers(bot: Bot<Context>): void {
     const state = regState.get(senderId);
     if (!state) {
       await ctx.reply("Отправьте /start для начала работы.");
+      return;
+    }
+
+    if (state.step === "phone") {
+      if (!/^\d{9}$/.test(text)) {
+        await ctx.reply(
+          "⚠️ Неверный формат номера.\n\n" +
+            "Введите 9 цифр в формате <b>XXX123456</b>, где XXX — код оператора.\n" +
+            "Пример: <code>500100500</code>",
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+      regState.set(senderId, { step: "name", phone: text });
+      await ctx.reply("📝 Введите ваше ФИО (Фамилия Имя Отчество):", {
+        reply_markup: { remove_keyboard: true },
+      });
       return;
     }
 
@@ -371,7 +434,14 @@ async function handleAddresses(ctx: Context) {
       "🏡 ул. Айбек-Ата, 1/2\n" +
       "📞 +996 550‒86‒74‒14\n" +
       "🕐 Пн–Сб: 9:00–19:00 (обед 13:00–14:00)",
-    { parse_mode: "HTML" }
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Pinduoduo", callback_data: "address_pinduoduo" }],
+        ],
+      },
+    }
   );
 }
 
@@ -390,7 +460,12 @@ async function handleProfile(ctx: Context) {
     `📃 <b>Ваш профиль</b>\n\n` +
       `🪪 Персональный КОД: <b>${user.client_code}</b>\n` +
       `👤 ФИО: ${user.full_name}\n` +
-      `📞 Номер: ${user.phone}`,
+      `📞 Номер: ${user.phone}\n\n` +
+      `📍 Адрес: Бишкек, Айбек-Ата 1/2\n` +
+      `📞 Телефон для связи: <a href="https://wa.me/996550867414">996 550 86 74 14</a>\n` +
+      `🕒 График работы: Ежедневно с 9:00 до 19:00\n` +
+      `🍴 Обеденный перерыв: с 13:00 до 14:00\n` +
+      `📌 Локация на карте: <a href="https://go.2gis.com/bwSnG">AsDi Cargo</a>`,
     { parse_mode: "HTML" }
   );
 }
