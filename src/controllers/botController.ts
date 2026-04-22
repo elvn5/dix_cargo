@@ -193,6 +193,9 @@ export function registerControllers(bot: Bot<Context>): void {
       },
     });
 
+    const photoPath = path.join(__dirname, "../assets/pinduoduo_photo.jpg");
+    await ctx.replyWithPhoto(new InputFile(photoPath));
+
     const videoPath = path.join(__dirname, "../assets/pinduoduo_video.MP4");
     await ctx.replyWithVideo(new InputFile(videoPath));
   });
