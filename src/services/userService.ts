@@ -12,7 +12,7 @@ async function generateClientCode(): Promise<string> {
     return n > max ? n : max;
   }, 0);
 
-  const paddedNumber = String(maxNumber + 1).padStart(3, "0");
+  const paddedNumber = String(maxNumber + 1).padStart(4, "0");
   return `DIX-${paddedNumber}`;
 }
 
