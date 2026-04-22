@@ -176,28 +176,31 @@ export function registerControllers(bot: Bot<Context>): void {
       : null;
     const code = user?.client_code ?? "????";
 
-    const addressText =
-      `八 DIX${code}\n` +
+    const addressLines =
+      `八 ${code}\n` +
       `广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n` +
-      `13763369694 八DIX${code}\n\n` +
+      `13763369694 八${code}`;
+
+    const infoText =
       `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
       `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
       `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`;
 
-    await ctx.reply(`<code>${addressText}</code>`, {
+    await ctx.reply(`<code>${addressLines}</code>\n\n${infoText}`, {
       parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "📩 Отправить на проверку", url: "https://wa.me/996550867414" }],
-        ],
-      },
     });
 
     const photoPath = path.join(__dirname, "../assets/pinduoduo_photo.jpg");
     await ctx.replyWithPhoto(new InputFile(photoPath));
 
     const videoPath = path.join(__dirname, "../assets/pinduoduo_video.MP4");
-    await ctx.replyWithVideo(new InputFile(videoPath));
+    await ctx.replyWithVideo(new InputFile(videoPath), {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📩 Отправить на проверку", url: "https://wa.me/996550867414" }],
+        ],
+      },
+    });
   });
 
   // ── Контакт ──────────────────────────────────────────────────────────────────
