@@ -413,7 +413,12 @@ async function handleProfile(ctx: Context) {
     `📃 <b>Ваш профиль</b>\n\n` +
       `🪪 Персональный КОД: <b>${user.client_code}</b>\n` +
       `👤 ФИО: ${user.full_name}\n` +
-      `📞 Номер: ${user.phone}`,
+      `📞 Номер: ${user.phone}\n\n` +
+      `📍 Адрес: Бишкек, Айбек-Ата 1/2\n` +
+      `📞 Телефон для связи: <a href="https://wa.me/996550867414">996 550 86 74 14</a>\n` +
+      `🕒 График работы: Ежедневно с 9:00 до 19:00\n` +
+      `🍴 Обеденный перерыв: с 13:00 до 14:00\n` +
+      `📌 Локация на карте: <a href="https://go.2gis.com/bwSnG">AsDi Cargo</a>`,
     { parse_mode: "HTML" }
   );
 }
