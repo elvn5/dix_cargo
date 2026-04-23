@@ -48,6 +48,7 @@ function layout(title: string, body: string, active = ""): string {
     <div class="nav flex-column mt-2 gap-1 flex-grow-1">
       ${nav("/admin", "Дашборд", '<i class="bi bi-speedometer2"></i>')}
       ${nav("/admin/users", "Пользователи", '<i class="bi bi-people"></i>')}
+      ${nav("/admin/settings", "Настройки бота", '<i class="bi bi-gear"></i>')}
     </div>
     <div class="p-3 border-top border-secondary">
       <a href="/admin/logout" class="btn btn-outline-light btn-sm w-100">
@@ -411,6 +412,48 @@ export function createAdminApp() {
   app.post("/admin/users/:id/delete", requireAuth, async (req, res) => {
     await prisma.user.delete({ where: { id: Number(req.params.id) } });
     res.redirect("/admin/users");
+  });
+
+  // ── Settings ───────────────────────────────────────────────────────────────
+
+  app.get("/admin/settings", requireAuth, async (req, res) => {
+    const saved = req.query.saved === "1";
+    const setting = await prisma.setting.findUnique({ where: { key: "forbidden_items" } });
+
+    const body = `
+      ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
+      <div class="row g-4">
+        <div class="col-lg-8">
+          <div class="card stat-card p-4">
+            <form method="POST" action="/admin/settings">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">
+                  🚫 Текст «Запрещённые товары»
+                  <span class="text-muted fw-normal small">— поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;)</span>
+                </label>
+                <textarea name="forbidden_items" class="form-control font-monospace" rows="20" required>${setting?.value ?? ""}</textarea>
+              </div>
+              <button class="btn btn-primary fw-semibold">
+                <i class="bi bi-check-lg"></i> Сохранить
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>`;
+
+    res.send(layout("Настройки бота", body, "/admin/settings"));
+  });
+
+  app.post("/admin/settings", requireAuth, async (req, res) => {
+    const { forbidden_items } = req.body as Record<string, string>;
+
+    await prisma.setting.upsert({
+      where: { key: "forbidden_items" },
+      update: { value: forbidden_items },
+      create: { key: "forbidden_items", value: forbidden_items },
+    });
+
+    res.redirect("/admin/settings?saved=1");
   });
 
   // ── Root redirect ──────────────────────────────────────────────────────────
