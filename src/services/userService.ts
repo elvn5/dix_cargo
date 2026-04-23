@@ -1,6 +1,5 @@
 import prisma from "../database/prismaClient";
 import type { User } from "@prisma/client";
-import { createHash } from "crypto";
 
 async function generateClientCode(): Promise<string> {
   const allCodes = await prisma.user.findMany({
@@ -25,18 +24,15 @@ async function findUserByTelegramId(telegramId: bigint): Promise<User | null> {
 async function createUser(
   telegramId: bigint,
   phone: string,
-  fullName: string,
-  password: string
+  fullName: string
 ): Promise<User> {
   const clientCode = await generateClientCode();
-  const passwordHash = createHash("sha256").update(password).digest("hex");
 
   return prisma.user.create({
     data: {
       telegram_id: telegramId,
       phone,
       full_name: fullName,
-      password: passwordHash,
       client_code: clientCode,
     },
   });

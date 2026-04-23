@@ -15,7 +15,6 @@ model User {
   telegram_id BigInt @unique
   phone       String
   full_name   String
-  password    String
   client_code String @unique
 
   created_at DateTime @default(now())
