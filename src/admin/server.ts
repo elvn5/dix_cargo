@@ -33,7 +33,7 @@ function layout(title: string, body: string, active = ""): string {
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet"/>
   <style>
     body { background:#f0f2f5; }
-    .sidebar { width:240px; flex-shrink:0; background:#1a1f36; }
+    .sidebar { width:240px; flex-shrink:0; background:#1a1f36 !important; }
     .sidebar .brand { font-size:1.25rem; font-weight:700; color:#fff; padding:1.5rem 1rem; border-bottom:1px solid #2d3561; }
     .sidebar .nav-link { padding:.6rem 1rem; border-radius:6px; margin:.1rem .5rem; }
     .sidebar .nav-link.active { background:#4e6ef2; color:#fff !important; }
