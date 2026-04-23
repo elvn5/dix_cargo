@@ -262,8 +262,10 @@ export function registerControllers(bot: Bot<Context>): void {
     }
 
     const lines = packages.map((p) =>
-      `📦 <code>${p.track_code}</code>\n` +
-      `   Добавлена: ${p.created_at.toLocaleDateString("ru-RU")}`
+      `📦 ${p.track_code}\n` +
+      `Статус посылки: ${STATUS_LABEL[status].replace(/^\S+\s/, "")}\n` +
+      `Дата отправки: ${p.created_at.toLocaleDateString("ru-RU")}\n` +
+      `Дата поступления: ${p.updated_at.toLocaleDateString("ru-RU")}`
     ).join("\n\n");
 
     await ctx.reply(
