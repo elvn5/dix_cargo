@@ -229,6 +229,49 @@ export function registerControllers(bot: Bot<Context>): void {
     });
   }
 
+  // ── Фильтр посылок ────────────────────────────────────────────────────────────
+  bot.callbackQuery(/^pkg_filter:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+
+    const telegramId = ctx.from?.id;
+    const user = telegramId
+      ? await userService.findUserByTelegramId(BigInt(telegramId))
+      : null;
+
+    if (!user) {
+      await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
+      return;
+    }
+
+    const status = ctx.match[1] as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
+
+    const STATUS_LABEL: Record<string, string> = {
+      IN_OFFICE:  "🏢 В офисе",
+      IN_TRANSIT: "🚚 В пути",
+      DELIVERED:  "✅ Выдан",
+    };
+
+    const packages = await prisma.package.findMany({
+      where: { user_id: user.id, status },
+      orderBy: { created_at: "desc" },
+    });
+
+    if (packages.length === 0) {
+      await ctx.reply(`${STATUS_LABEL[status]}: посылок нет.`);
+      return;
+    }
+
+    const lines = packages.map((p) =>
+      `📦 <code>${p.track_code}</code>\n` +
+      `   Добавлена: ${p.created_at.toLocaleDateString("ru-RU")}`
+    ).join("\n\n");
+
+    await ctx.reply(
+      `${STATUS_LABEL[status]} — ${packages.length} шт.\n\n${lines}`,
+      { parse_mode: "HTML" }
+    );
+  });
+
   // ── Контакт ──────────────────────────────────────────────────────────────────
   bot.on("message:contact", async (ctx) => {
     const contact = ctx.message.contact;
@@ -365,38 +408,18 @@ export function registerControllers(bot: Bot<Context>): void {
 // ── Обработчики кнопок меню ───────────────────────────────────────────────────
 
 async function handlePackages(ctx: Context) {
-  const telegramId = ctx.from?.id;
-  if (!telegramId) return;
-
-  const user = await userService.findUserByTelegramId(BigInt(telegramId));
-  if (!user) {
-    await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
-    return;
-  }
-
-  const packages = await prisma.package.findMany({
-    where: { user_id: user.id },
-    orderBy: { created_at: "desc" },
+  await ctx.reply("📦 <b>Мои посылки</b>\n\nВыберите статус:", {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "🏢 В офисе", callback_data: "pkg_filter:IN_OFFICE" },
+          { text: "🚚 В пути",  callback_data: "pkg_filter:IN_TRANSIT" },
+          { text: "✅ Выданы",  callback_data: "pkg_filter:DELIVERED" },
+        ],
+      ],
+    },
   });
-
-  if (packages.length === 0) {
-    await ctx.reply("📦 <b>Мои посылки</b>\n\nУ вас пока нет посылок.", { parse_mode: "HTML" });
-    return;
-  }
-
-  const STATUS_LABEL: Record<string, string> = {
-    IN_OFFICE:  "🏢 В офисе",
-    IN_TRANSIT: "🚚 В пути",
-    DELIVERED:  "✅ Выдан",
-  };
-
-  const lines = packages.map((p) =>
-    `📦 <code>${p.track_code}</code>\n` +
-    `   Статус: ${STATUS_LABEL[p.status]}\n` +
-    `   Добавлена: ${p.created_at.toLocaleDateString("ru-RU")}`
-  ).join("\n\n");
-
-  await ctx.reply(`📦 <b>Мои посылки</b>\n\n${lines}`, { parse_mode: "HTML" });
 }
 
 async function handleForbidden(ctx: Context) {
