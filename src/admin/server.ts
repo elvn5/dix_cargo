@@ -1,5 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import session from "express-session";
+import multer from "multer";
+import * as XLSX from "xlsx";
 import prisma from "../database/prismaClient";
 
 declare module "express-session" {
@@ -415,6 +417,120 @@ export function createAdminApp() {
     res.redirect("/admin/users");
   });
 
+  // ── Excel import ──────────────────────────────────────────────────────────
+
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+  app.get("/admin/packages/import", requireAuth, (_req, res) => {
+    const body = `
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <div class="card stat-card p-4">
+            <p class="text-muted small mb-3">
+              Файл Excel с колонками <b>код</b> (DIX****) и <b>трек</b>.<br>
+              Дата отправки извлекается из имени файла (формат: <code>4月18号…</code>).<br>
+              Если дата не найдена — используется сегодняшняя.
+            </p>
+            <form method="POST" action="/admin/packages/import" enctype="multipart/form-data">
+              <div class="mb-4">
+                <label class="form-label fw-semibold">Excel файл (.xlsx)</label>
+                <input type="file" name="file" accept=".xlsx" class="form-control" required/>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-primary fw-semibold">
+                  <i class="bi bi-upload"></i> Импортировать
+                </button>
+                <a href="/admin/packages" class="btn btn-outline-secondary">Отмена</a>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>`;
+
+    res.send(layout("Импорт посылок из Excel", body, "/admin/packages"));
+  });
+
+  app.post("/admin/packages/import", requireAuth, upload.single("file"), async (req, res) => {
+    if (!req.file) return res.redirect("/admin/packages/import");
+
+    // Extract shipping date from filename: "4月18号" → month=4, day=18
+    const filename = req.file.originalname;
+    const dateMatch = filename.match(/(\d+)月(\d+)号/);
+    let shippingDate: Date;
+    if (dateMatch) {
+      const month = parseInt(dateMatch[1], 10) - 1;
+      const day   = parseInt(dateMatch[2], 10);
+      shippingDate = new Date(new Date().getFullYear(), month, day);
+    } else {
+      shippingDate = new Date();
+    }
+
+    // Parse Excel
+    const wb = XLSX.read(req.file.buffer, { type: "buffer" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as string[][];
+
+    // Find header row containing "код" and "трек"
+    let codeCol = -1, trackCol = -1, headerRow = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i].map((c) => String(c).trim().toLowerCase());
+      const ci = row.indexOf("код");
+      const ti = row.indexOf("трек");
+      if (ci !== -1 && ti !== -1) {
+        codeCol = ci; trackCol = ti; headerRow = i;
+        break;
+      }
+    }
+
+    if (headerRow === -1) {
+      return res.send(layout("Импорт посылок из Excel",
+        `<div class="alert alert-danger">Не найдены колонки «код» и «трек» в файле.</div>
+         <a href="/admin/packages/import" class="btn btn-secondary">Назад</a>`,
+        "/admin/packages"
+      ));
+    }
+
+    let imported = 0, skipped = 0;
+    const errors: string[] = [];
+
+    for (let i = headerRow + 1; i < rows.length; i++) {
+      const row = rows[i];
+      const rawCode  = String(row[codeCol] ?? "").trim();
+      const trackCode = String(row[trackCol] ?? "").trim();
+
+      if (!rawCode || !trackCode) continue;
+
+      // Convert DIX1222 → DIX-1222
+      const clientCode = rawCode.match(/^DIX-?\d+$/i)
+        ? rawCode.replace(/^DIX-?(\d+)$/i, (_, n) => `DIX-${n.padStart(4, "0")}`)
+        : null;
+
+      if (!clientCode) { skipped++; continue; }
+
+      const user = await prisma.user.findUnique({ where: { client_code: clientCode } });
+      if (!user) { errors.push(`${clientCode}: пользователь не найден`); skipped++; continue; }
+
+      await prisma.package.create({
+        data: {
+          user_id:    user.id,
+          track_code: trackCode,
+          status:     "IN_TRANSIT",
+          created_at: shippingDate,
+        },
+      });
+      imported++;
+    }
+
+    const msg = `Импортировано: <b>${imported}</b> посылок. Пропущено: ${skipped}.` +
+      (errors.length ? `<br><small class="text-muted">${errors.slice(0, 10).join("<br>")}</small>` : "");
+
+    res.send(layout("Импорт посылок из Excel",
+      `<div class="alert alert-success">${msg}</div>
+       <a href="/admin/packages" class="btn btn-primary">К списку посылок</a>`,
+      "/admin/packages"
+    ));
+  });
+
   // ── Packages list ─────────────────────────────────────────────────────────
 
   app.get("/admin/packages", requireAuth, async (_req, res) => {
@@ -447,9 +563,14 @@ export function createAdminApp() {
     const body = `
       <div class="d-flex justify-content-between align-items-center mb-4">
         <span class="text-muted">${packages.length} посылок</span>
-        <a href="/admin/packages/new" class="btn btn-primary">
-          <i class="bi bi-plus-lg"></i> Добавить посылку
-        </a>
+        <div class="d-flex gap-2">
+          <a href="/admin/packages/import" class="btn btn-outline-success">
+            <i class="bi bi-file-earmark-excel"></i> Импорт Excel
+          </a>
+          <a href="/admin/packages/new" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> Добавить посылку
+          </a>
+        </div>
       </div>
       <div class="card stat-card">
         <div class="table-responsive">
