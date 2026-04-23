@@ -482,9 +482,14 @@ async function handleTemplate(ctx: Context) {
   await ctx.reply("🛍 Выберите маркетплейс:", {
     reply_markup: {
       inline_keyboard: [
-        [{ text: "Pinduoduo", callback_data: "template_pinduoduo" }],
-        [{ text: "Taobao",    callback_data: "template_taobao" }],
-        [{ text: "1688",      callback_data: "template_1688" }],
+        [
+          { text: "Pinduoduo", callback_data: "address_pinduoduo" },
+          { text: "TaoBao",    callback_data: "address_taobao" },
+        ],
+        [
+          { text: "1688",   callback_data: "address_1688" },
+          { text: "Poizon", callback_data: "address_poizon" },
+        ],
       ],
     },
   });
