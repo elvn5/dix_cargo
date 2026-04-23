@@ -19,9 +19,14 @@ const MENU_KEYBOARD = {
   persistent: true,
 };
 
-const COMPANY_INFO =
-  `📍 Номер: +996 550‒86‒74‒14\n` +
-  `📍 Часы работы: С 9:00-19:00\nОбед 13:00-14:00`;
+const MANAGERS_KEYBOARD = {
+  inline_keyboard: [
+    [
+      { text: "Лидия",    url: "https://wa.me/996550867414" },
+      { text: "Виктория", url: "https://wa.me/996556969906" },
+    ],
+  ],
+};
 
 function buildProfile(code: string, fullName: string, phone: string): string {
   return (
@@ -29,8 +34,7 @@ function buildProfile(code: string, fullName: string, phone: string): string {
     `📃 Ваш профиль\n\n` +
     `🪪 Персональный КОД: <b>${code}</b>\n` +
     `👤 ФИО: ${fullName}\n` +
-    `📞 Номер: ${phone}` +
-    COMPANY_INFO
+    `📞 Номер: ${phone}`
   );
 }
 
@@ -326,8 +330,9 @@ export function registerControllers(bot: Bot<Context>): void {
 
         await ctx.reply(
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
-          { parse_mode: "HTML", reply_markup: MENU_KEYBOARD }
+          { parse_mode: "HTML", reply_markup: MANAGERS_KEYBOARD }
         );
+        await ctx.reply("Выберите раздел:", { reply_markup: MENU_KEYBOARD });
       } catch (error) {
         console.error("[Registration] Ошибка при создании пользователя:", error);
         await ctx.reply("⚠️ Произошла ошибка при регистрации. Попробуйте позже.");
