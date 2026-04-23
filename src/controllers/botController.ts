@@ -453,10 +453,8 @@ async function handleSupport(ctx: Context) {
   await ctx.reply(
     "💬 <b>Поддержка</b>\n\nСвяжитесь с нами любым удобным способом:\n\n" +
       "📍 Адрес: Бишкек, Айбек-Ата 1/2\n" +
-      "📞 Телефон: <a href=\"https://wa.me/996550867414\">996 550 86 74 14</a>\n" +
       "🕒 График работы: Ежедневно с 9:00 до 19:00\n" +
-      "🍴 Обеденный перерыв: с 13:00 до 14:00\n" +
-      "📌 Локация: <a href=\"https://go.2gis.com/bwSnG\">AsDi Cargo</a>",
+      "📌 Локация на карте: <a href=\"https://go.2gis.com/bwSnG\">AsDi Cargo</a>",
     {
       parse_mode: "HTML",
       reply_markup: {
