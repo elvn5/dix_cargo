@@ -200,11 +200,7 @@ export function registerControllers(bot: Bot<Context>): void {
     await ctx.replyWithVideo(new InputFile(videoPath));
 
     await ctx.reply("📩 Готово? Отправьте скриншот на проверку:", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "📩 Отправить на проверку", url: "https://wa.me/996550867414" }],
-        ],
-      },
+      reply_markup: MANAGERS_KEYBOARD,
     });
   });
 
