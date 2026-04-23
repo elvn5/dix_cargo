@@ -204,6 +204,40 @@ export function registerControllers(bot: Bot<Context>): void {
     });
   });
 
+  for (const key of ["address_taobao", "address_1688", "address_poizon"] as const) {
+    bot.callbackQuery(key, async (ctx) => {
+      await ctx.answerCallbackQuery();
+
+      const telegramId = ctx.from?.id;
+      const user = telegramId
+        ? await userService.findUserByTelegramId(BigInt(telegramId))
+        : null;
+      const code = user?.client_code ?? "????";
+
+      const addressLines =
+        `八 ${code}\n` +
+        `广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n` +
+        `13763369694 八${code}`;
+
+      const infoText =
+        `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+        `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+        `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`;
+
+      await ctx.reply(`<code>${addressLines}</code>\n\n${infoText}`, { parse_mode: "HTML" });
+
+      const photoPath = path.join(__dirname, "../assets/pinduoduo_photo.jpg");
+      await ctx.replyWithPhoto(new InputFile(photoPath));
+
+      const videoPath = path.join(__dirname, "../assets/pinduoduo_video.MP4");
+      await ctx.replyWithVideo(new InputFile(videoPath));
+
+      await ctx.reply("📩 Готово? Отправьте скриншот на проверку:", {
+        reply_markup: MANAGERS_KEYBOARD,
+      });
+    });
+  }
+
   // ── Контакт ──────────────────────────────────────────────────────────────────
   bot.on("message:contact", async (ctx) => {
     const contact = ctx.message.contact;
@@ -381,7 +415,14 @@ async function handleAddresses(ctx: Context) {
       parse_mode: "HTML",
       reply_markup: {
         inline_keyboard: [
-          [{ text: "Pinduoduo", callback_data: "address_pinduoduo" }],
+          [
+            { text: "Pinduoduo", callback_data: "address_pinduoduo" },
+            { text: "TaoBao",    callback_data: "address_taobao" },
+          ],
+          [
+            { text: "1688",   callback_data: "address_1688" },
+            { text: "Poizon", callback_data: "address_poizon" },
+          ],
         ],
       },
     }
