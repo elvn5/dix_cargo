@@ -360,7 +360,10 @@ async function handleForbidden(ctx: Context) {
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [
-        [{ text: "💬 Связаться с менеджером", url: "https://wa.me/996550867414" }],
+        [
+          { text: "Лидия",    url: "https://wa.me/996550867414" },
+          { text: "Виктория", url: "https://wa.me/996556969906" },
+        ],
       ],
     },
   });
