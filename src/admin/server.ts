@@ -533,11 +533,28 @@ export function createAdminApp() {
 
   // ── Packages list ─────────────────────────────────────────────────────────
 
-  app.get("/admin/packages", requireAuth, async (_req, res) => {
-    const packages = await prisma.package.findMany({
-      include: { user: { select: { client_code: true, full_name: true } } },
-      orderBy: { created_at: "desc" },
-    });
+  app.get("/admin/packages", requireAuth, async (req, res) => {
+    const PAGE_SIZE = 25;
+    const page    = Math.max(1, parseInt(req.query.page as string) || 1);
+    const search  = ((req.query.search as string) ?? "").trim();
+    const statusQ = (req.query.status as string) ?? "";
+
+    const where: Record<string, unknown> = {};
+    if (search)  where.track_code = { contains: search, mode: "insensitive" };
+    if (statusQ) where.status = statusQ;
+
+    const [packages, total] = await Promise.all([
+      prisma.package.findMany({
+        where,
+        include: { user: { select: { client_code: true, full_name: true } } },
+        orderBy: { created_at: "desc" },
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+      }),
+      prisma.package.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / PAGE_SIZE);
 
     const STATUS_LABEL: Record<string, string> = {
       IN_OFFICE:  "🏢 В офисе",
@@ -550,6 +567,20 @@ export function createAdminApp() {
       DELIVERED:  "bg-success",
     };
 
+    const qs = (extra: Record<string, unknown>) => {
+      const p = new URLSearchParams({ search, status: statusQ, page: String(page), ...extra });
+      return "?" + p.toString();
+    };
+
+    const statusOptions = [
+      ["", "Все статусы"],
+      ["IN_TRANSIT", "🚚 В пути"],
+      ["IN_OFFICE",  "🏢 В офисе"],
+      ["DELIVERED",  "✅ Выдан"],
+    ].map(([v, l]) =>
+      `<option value="${v}" ${statusQ === v ? "selected" : ""}>${l}</option>`
+    ).join("");
+
     const rows = packages.map((p) => `
       <tr>
         <td class="font-monospace">${p.track_code}</td>
@@ -560,9 +591,25 @@ export function createAdminApp() {
         <td><a href="/admin/packages/${p.id}" class="btn btn-sm btn-outline-primary">Открыть</a></td>
       </tr>`).join("");
 
+    const pagination = totalPages > 1 ? `
+      <nav class="mt-3">
+        <ul class="pagination pagination-sm mb-0 justify-content-center">
+          <li class="page-item ${page <= 1 ? "disabled" : ""}">
+            <a class="page-link" href="${qs({ page: page - 1 })}">‹</a>
+          </li>
+          ${Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => `
+            <li class="page-item ${p === page ? "active" : ""}">
+              <a class="page-link" href="${qs({ page: p })}">${p}</a>
+            </li>`).join("")}
+          <li class="page-item ${page >= totalPages ? "disabled" : ""}">
+            <a class="page-link" href="${qs({ page: page + 1 })}">›</a>
+          </li>
+        </ul>
+      </nav>` : "";
+
     const body = `
-      <div class="d-flex justify-content-between align-items-center mb-4">
-        <span class="text-muted">${packages.length} посылок</span>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <span class="text-muted">${total} посылок</span>
         <div class="d-flex gap-2">
           <a href="/admin/packages/import" class="btn btn-outline-success">
             <i class="bi bi-file-earmark-excel"></i> Импорт Excel
@@ -572,6 +619,18 @@ export function createAdminApp() {
           </a>
         </div>
       </div>
+      <form method="GET" action="/admin/packages" class="row g-2 mb-3">
+        <div class="col">
+          <input name="search" value="${search}" class="form-control" placeholder="🔍 Поиск по трек-номеру…"/>
+        </div>
+        <div class="col-auto">
+          <select name="status" class="form-select">${statusOptions}</select>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-outline-primary">Найти</button>
+          <a href="/admin/packages" class="btn btn-outline-secondary">Сброс</a>
+        </div>
+      </form>
       <div class="card stat-card">
         <div class="table-responsive">
           <table class="table table-hover mb-0 align-middle">
@@ -581,6 +640,7 @@ export function createAdminApp() {
             <tbody>${rows || "<tr><td colspan='6' class='text-center text-muted py-4'>Нет посылок</td></tr>"}</tbody>
           </table>
         </div>
+        ${pagination}
       </div>`;
 
     res.send(layout("Посылки", body, "/admin/packages"));
