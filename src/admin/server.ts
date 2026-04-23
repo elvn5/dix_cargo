@@ -48,6 +48,7 @@ function layout(title: string, body: string, active = ""): string {
     <div class="nav flex-column mt-2 gap-1 flex-grow-1">
       ${nav("/admin", "Дашборд", '<i class="bi bi-speedometer2"></i>')}
       ${nav("/admin/users", "Пользователи", '<i class="bi bi-people"></i>')}
+      ${nav("/admin/packages", "Посылки", '<i class="bi bi-box-seam"></i>')}
       ${nav("/admin/settings", "Настройки бота", '<i class="bi bi-gear"></i>')}
     </div>
     <div class="p-3 border-top border-secondary">
@@ -412,6 +413,201 @@ export function createAdminApp() {
   app.post("/admin/users/:id/delete", requireAuth, async (req, res) => {
     await prisma.user.delete({ where: { id: Number(req.params.id) } });
     res.redirect("/admin/users");
+  });
+
+  // ── Packages list ─────────────────────────────────────────────────────────
+
+  app.get("/admin/packages", requireAuth, async (_req, res) => {
+    const packages = await prisma.package.findMany({
+      include: { user: { select: { client_code: true, full_name: true } } },
+      orderBy: { created_at: "desc" },
+    });
+
+    const STATUS_LABEL: Record<string, string> = {
+      IN_OFFICE:  "🏢 В офисе",
+      IN_TRANSIT: "🚚 В пути",
+      DELIVERED:  "✅ Выдан",
+    };
+    const STATUS_BADGE: Record<string, string> = {
+      IN_OFFICE:  "bg-warning text-dark",
+      IN_TRANSIT: "bg-primary",
+      DELIVERED:  "bg-success",
+    };
+
+    const rows = packages.map((p) => `
+      <tr>
+        <td class="font-monospace">${p.track_code}</td>
+        <td><span class="badge ${STATUS_BADGE[p.status]}">${STATUS_LABEL[p.status]}</span></td>
+        <td><span class="badge-code">${p.user.client_code}</span></td>
+        <td class="small text-muted">${p.user.full_name}</td>
+        <td class="text-muted small">${p.created_at.toLocaleString("ru-RU")}</td>
+        <td><a href="/admin/packages/${p.id}" class="btn btn-sm btn-outline-primary">Открыть</a></td>
+      </tr>`).join("");
+
+    const body = `
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <span class="text-muted">${packages.length} посылок</span>
+        <a href="/admin/packages/new" class="btn btn-primary">
+          <i class="bi bi-plus-lg"></i> Добавить посылку
+        </a>
+      </div>
+      <div class="card stat-card">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0 align-middle">
+            <thead><tr>
+              <th>Трек-код</th><th>Статус</th><th>DIX-код</th><th>Клиент</th><th>Дата</th><th></th>
+            </tr></thead>
+            <tbody>${rows || "<tr><td colspan='6' class='text-center text-muted py-4'>Нет посылок</td></tr>"}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    res.send(layout("Посылки", body, "/admin/packages"));
+  });
+
+  // ── Package new ────────────────────────────────────────────────────────────
+
+  app.get("/admin/packages/new", requireAuth, async (_req, res) => {
+    const users = await prisma.user.findMany({
+      orderBy: { client_code: "asc" },
+      select: { id: true, client_code: true, full_name: true },
+    });
+
+    const options = users.map((u) =>
+      `<option value="${u.id}">${u.client_code} — ${u.full_name}</option>`
+    ).join("");
+
+    const body = `
+      <div class="row g-4">
+        <div class="col-lg-5">
+          <div class="card stat-card p-4">
+            <form method="POST" action="/admin/packages/new">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Клиент</label>
+                <select name="user_id" class="form-select" required>${options}</select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Трек-код</label>
+                <input name="track_code" class="form-control font-monospace" required placeholder="RU123456789CN"/>
+              </div>
+              <div class="mb-4">
+                <label class="form-label fw-semibold">Статус</label>
+                <select name="status" class="form-select">
+                  <option value="IN_TRANSIT">🚚 В пути</option>
+                  <option value="IN_OFFICE">🏢 В офисе</option>
+                  <option value="DELIVERED">✅ Выдан</option>
+                </select>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-primary fw-semibold">
+                  <i class="bi bi-plus-lg"></i> Добавить
+                </button>
+                <a href="/admin/packages" class="btn btn-outline-secondary">Отмена</a>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>`;
+
+    res.send(layout("Новая посылка", body, "/admin/packages"));
+  });
+
+  app.post("/admin/packages/new", requireAuth, async (req, res) => {
+    const { user_id, track_code, status } = req.body as Record<string, string>;
+
+    await prisma.package.create({
+      data: {
+        user_id: Number(user_id),
+        track_code: track_code.trim(),
+        status: status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+      },
+    });
+
+    res.redirect("/admin/packages");
+  });
+
+  // ── Package detail / edit ──────────────────────────────────────────────────
+
+  app.get("/admin/packages/:id", requireAuth, async (req, res) => {
+    const pkg = await prisma.package.findUnique({
+      where: { id: Number(req.params.id) },
+      include: { user: { select: { client_code: true, full_name: true } } },
+    });
+    if (!pkg) return res.redirect("/admin/packages");
+
+    const saved = req.query.saved === "1";
+
+    const body = `
+      ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
+      <div class="row g-4">
+        <div class="col-lg-5">
+          <div class="card stat-card p-4">
+            <form method="POST" action="/admin/packages/${pkg.id}">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Трек-код</label>
+                <input name="track_code" value="${pkg.track_code}" class="form-control font-monospace" required/>
+              </div>
+              <div class="mb-4">
+                <label class="form-label fw-semibold">Статус</label>
+                <select name="status" class="form-select">
+                  <option value="IN_TRANSIT" ${pkg.status === "IN_TRANSIT" ? "selected" : ""}>🚚 В пути</option>
+                  <option value="IN_OFFICE"  ${pkg.status === "IN_OFFICE"  ? "selected" : ""}>🏢 В офисе</option>
+                  <option value="DELIVERED"  ${pkg.status === "DELIVERED"  ? "selected" : ""}>✅ Выдан</option>
+                </select>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-primary fw-semibold">
+                  <i class="bi bi-check-lg"></i> Сохранить
+                </button>
+                <a href="/admin/packages" class="btn btn-outline-secondary">Назад</a>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="card stat-card p-4">
+            <div class="text-muted small fw-semibold mb-3 text-uppercase">Информация</div>
+            <dl class="mb-0 small">
+              <dt class="text-muted">Клиент</dt>
+              <dd><span class="badge-code">${pkg.user.client_code}</span> ${pkg.user.full_name}</dd>
+              <dt class="text-muted">Дата добавления</dt>
+              <dd>${pkg.created_at.toLocaleString("ru-RU")}</dd>
+              <dt class="text-muted">Последнее изменение</dt>
+              <dd>${pkg.updated_at.toLocaleString("ru-RU")}</dd>
+            </dl>
+          </div>
+          <div class="card stat-card p-4 mt-3 border-danger">
+            <div class="text-danger fw-semibold mb-2 small">Опасная зона</div>
+            <form method="POST" action="/admin/packages/${pkg.id}/delete"
+                  onsubmit="return confirm('Удалить посылку ${pkg.track_code}?')">
+              <button class="btn btn-outline-danger btn-sm w-100">
+                <i class="bi bi-trash"></i> Удалить посылку
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>`;
+
+    res.send(layout(pkg.track_code, body, "/admin/packages"));
+  });
+
+  app.post("/admin/packages/:id", requireAuth, async (req, res) => {
+    const { track_code, status } = req.body as Record<string, string>;
+
+    await prisma.package.update({
+      where: { id: Number(req.params.id) },
+      data: {
+        track_code: track_code.trim(),
+        status: status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+      },
+    });
+
+    res.redirect(`/admin/packages/${req.params.id}?saved=1`);
+  });
+
+  app.post("/admin/packages/:id/delete", requireAuth, async (req, res) => {
+    await prisma.package.delete({ where: { id: Number(req.params.id) } });
+    res.redirect("/admin/packages");
   });
 
   // ── Settings ───────────────────────────────────────────────────────────────

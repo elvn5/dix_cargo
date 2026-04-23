@@ -10,6 +10,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum PackageStatus {
+  IN_OFFICE
+  IN_TRANSIT
+  DELIVERED
+}
+
+model Package {
+  id         Int           @id @default(autoincrement())
+  track_code String
+  status     PackageStatus @default(IN_TRANSIT)
+  user_id    Int
+  user       User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("packages")
+}
+
 model Setting {
   key        String   @id
   value      String
@@ -19,11 +38,12 @@ model Setting {
 }
 
 model User {
-  id          Int    @id @default(autoincrement())
-  telegram_id BigInt @unique
+  id          Int       @id @default(autoincrement())
+  telegram_id BigInt    @unique
   phone       String
   full_name   String
-  client_code String @unique
+  client_code String    @unique
+  packages    Package[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt

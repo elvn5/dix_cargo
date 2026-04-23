@@ -159,15 +159,6 @@ export function registerControllers(bot: Bot<Context>): void {
     await ctx.reply("📖 <b>Инструкция — 1688</b>\n\nСкоро здесь появится инструкция.", { parse_mode: "HTML" });
   });
 
-  bot.callbackQuery("packages_office", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.reply("🏢 <b>Посылки в офисе</b>\n\nНет посылок со статусом «В офисе».", { parse_mode: "HTML" });
-  });
-
-  bot.callbackQuery("packages_transit", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.reply("🚚 <b>Посылки в пути</b>\n\nНет посылок со статусом «В пути».", { parse_mode: "HTML" });
-  });
 
   // ── Адрес Pinduoduo ───────────────────────────────────────────────────────────
   bot.callbackQuery("address_pinduoduo", async (ctx) => {
@@ -374,17 +365,38 @@ export function registerControllers(bot: Bot<Context>): void {
 // ── Обработчики кнопок меню ───────────────────────────────────────────────────
 
 async function handlePackages(ctx: Context) {
-  await ctx.reply("📦 <b>Мои посылки</b>\n\nВыберите статус:", {
-    parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "🏢 В Офисе", callback_data: "packages_office" },
-          { text: "🚚 В пути",  callback_data: "packages_transit" },
-        ],
-      ],
-    },
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+
+  const user = await userService.findUserByTelegramId(BigInt(telegramId));
+  if (!user) {
+    await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
+    return;
+  }
+
+  const packages = await prisma.package.findMany({
+    where: { user_id: user.id },
+    orderBy: { created_at: "desc" },
   });
+
+  if (packages.length === 0) {
+    await ctx.reply("📦 <b>Мои посылки</b>\n\nУ вас пока нет посылок.", { parse_mode: "HTML" });
+    return;
+  }
+
+  const STATUS_LABEL: Record<string, string> = {
+    IN_OFFICE:  "🏢 В офисе",
+    IN_TRANSIT: "🚚 В пути",
+    DELIVERED:  "✅ Выдан",
+  };
+
+  const lines = packages.map((p) =>
+    `📦 <code>${p.track_code}</code>\n` +
+    `   Статус: ${STATUS_LABEL[p.status]}\n` +
+    `   Добавлена: ${p.created_at.toLocaleDateString("ru-RU")}`
+  ).join("\n\n");
+
+  await ctx.reply(`📦 <b>Мои посылки</b>\n\n${lines}`, { parse_mode: "HTML" });
 }
 
 async function handleForbidden(ctx: Context) {
