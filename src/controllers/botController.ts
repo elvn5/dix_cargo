@@ -5,7 +5,8 @@ import path from "path";
 
 type RegStep =
   | { step: "phone" }
-  | { step: "name"; phone: string };
+  | { step: "name"; phone: string }
+  | { step: "track_search" };
 
 const regState = new Map<number, RegStep>();
 
@@ -274,6 +275,15 @@ export function registerControllers(bot: Bot<Context>): void {
     );
   });
 
+  // ── Поиск по трек-номеру ─────────────────────────────────────────────────────
+  bot.callbackQuery("pkg_search", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const senderId = ctx.from?.id;
+    if (!senderId) return;
+    regState.set(senderId, { step: "track_search" });
+    await ctx.reply("🔍 Введите трек-номер посылки:");
+  });
+
   // ── Контакт ──────────────────────────────────────────────────────────────────
   bot.on("message:contact", async (ctx) => {
     const contact = ctx.message.contact;
@@ -341,6 +351,40 @@ export function registerControllers(bot: Bot<Context>): void {
     const state = regState.get(senderId);
     if (!state) {
       await ctx.reply("Отправьте /start для начала работы.");
+      return;
+    }
+
+    if (state.step === "track_search") {
+      regState.delete(senderId);
+
+      const user = await userService.findUserByTelegramId(BigInt(senderId));
+      if (!user) {
+        await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
+        return;
+      }
+
+      const pkg = await prisma.package.findFirst({
+        where: { user_id: user.id, track_code: text },
+      });
+
+      if (!pkg) {
+        await ctx.reply(`❌ Посылка с трек-номером <code>${text}</code> не найдена.`, { parse_mode: "HTML" });
+        return;
+      }
+
+      const STATUS_LABEL: Record<string, string> = {
+        IN_OFFICE:  "В офисе",
+        IN_TRANSIT: "В пути",
+        DELIVERED:  "Выдан",
+      };
+
+      await ctx.reply(
+        `📦 ${pkg.track_code}\n` +
+        `Статус посылки: ${STATUS_LABEL[pkg.status]}\n` +
+        `Дата отправки: ${pkg.created_at.toLocaleDateString("ru-RU")}\n` +
+        `Дата поступления: ${pkg.updated_at.toLocaleDateString("ru-RU")}`,
+        { parse_mode: "HTML" }
+      );
       return;
     }
 
@@ -418,6 +462,9 @@ async function handlePackages(ctx: Context) {
           { text: "🏢 В офисе", callback_data: "pkg_filter:IN_OFFICE" },
           { text: "🚚 В пути",  callback_data: "pkg_filter:IN_TRANSIT" },
           { text: "✅ Выданы",  callback_data: "pkg_filter:DELIVERED" },
+        ],
+        [
+          { text: "🔍 Найти по трек-номеру", callback_data: "pkg_search" },
         ],
       ],
     },
