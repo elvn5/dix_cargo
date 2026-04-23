@@ -15,6 +15,15 @@ async function generateClientCode(): Promise<string> {
   return `DIX-${paddedNumber}`;
 }
 
+async function generateUniqueClientCode(): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = await generateClientCode();
+    const existing = await prisma.user.findUnique({ where: { client_code: code } });
+    if (!existing) return code;
+  }
+  throw new Error("Failed to generate unique client code after 10 attempts");
+}
+
 async function findUserByTelegramId(telegramId: bigint): Promise<User | null> {
   return prisma.user.findUnique({
     where: { telegram_id: telegramId },
@@ -26,7 +35,7 @@ async function createUser(
   phone: string,
   fullName: string
 ): Promise<User> {
-  const clientCode = await generateClientCode();
+  const clientCode = await generateUniqueClientCode();
 
   return prisma.user.create({
     data: {
@@ -42,4 +51,5 @@ export const userService = {
   findUserByTelegramId,
   createUser,
   generateClientCode,
+  generateUniqueClientCode,
 };

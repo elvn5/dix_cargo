@@ -3,6 +3,7 @@ import session from "express-session";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import prisma from "../database/prismaClient";
+import { userService } from "../services/userService";
 
 declare module "express-session" {
   interface SessionData {
@@ -372,14 +373,7 @@ export function createAdminApp() {
 
     let code = client_code?.trim();
     if (!code) {
-      const lastUser = await prisma.user.findFirst({
-        orderBy: { id: "desc" },
-        select: { client_code: true },
-      });
-      const lastNumber = lastUser
-        ? parseInt(lastUser.client_code.split("-")[1] ?? "0", 10)
-        : 0;
-      code = `DIX-${String(lastNumber + 1).padStart(4, "0")}`;
+      code = await userService.generateUniqueClientCode();
     }
 
     const tgId = telegram_id?.trim()
@@ -405,9 +399,11 @@ export function createAdminApp() {
     if (!user) return res.redirect("/admin/users");
 
     const saved = req.query.saved === "1";
+    const dupCode = req.query.error === "duplicate_code";
 
     const body = `
       ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
+      ${dupCode ? `<div class="alert alert-danger">Код клиента уже занят — введите другой.</div>` : ""}
       <div class="row g-4">
         <div class="col-lg-6">
           <div class="card stat-card p-4">
@@ -465,11 +461,19 @@ export function createAdminApp() {
   app.post("/admin/users/:id", requireAuth, async (req, res) => {
     const { client_code, full_name, phone } = req.body as Record<string, string>;
 
-    await prisma.user.update({
-      where: { id: Number(req.params.id) },
-      data: { client_code, full_name, phone },
-    });
-    res.redirect(`/admin/users/${req.params.id}?saved=1`);
+    try {
+      await prisma.user.update({
+        where: { id: Number(req.params.id) },
+        data: { client_code, full_name, phone },
+      });
+      res.redirect(`/admin/users/${req.params.id}?saved=1`);
+    } catch (e: any) {
+      if (e?.code === "P2002") {
+        res.redirect(`/admin/users/${req.params.id}?error=duplicate_code`);
+      } else {
+        throw e;
+      }
+    }
   });
 
   // ── Delete user ────────────────────────────────────────────────────────────
