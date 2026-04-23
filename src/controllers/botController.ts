@@ -1,5 +1,6 @@
 import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
+import prisma from "../database/prismaClient";
 import path from "path";
 
 type RegStep =
@@ -352,31 +353,20 @@ async function handlePackages(ctx: Context) {
 }
 
 async function handleForbidden(ctx: Context) {
-  await ctx.reply(
-    "📌 <b>Список запрещённых к перевозке грузов:</b>\n\n" +
-      "1. Лекарственные препараты, наркотические и психотропные вещества;\n" +
-      "2. Легковоспламеняющиеся, взрывчатые и едкие вещества (фейерверки, газы в баллонах и т.п.);\n" +
-      "3. Охотничьи ножи (кухонные-бытовые можно);\n" +
-      "4. Оружие, наручники и его имитация;\n" +
-      "5. Предметы военного характера и одежда;\n" +
-      "6. Дроны, квадрокоптеры;\n" +
-      "7. Электронные сигареты, табачные изделия;\n" +
-      "8. Драгоценные металлы и камни;\n" +
-      "9. Меха, антиквариат и валютные ценности;\n" +
-      "10. Большие зеркала;\n" +
-      "11. Живые существа.\n\n" +
-      "❗️ Если у вас есть сомнения по поводу заказа какого-либо товара — напишите нам. Мы предоставим информацию о возможности его доставки.\n\n" +
-      "⚠️ Эти товары запрещены к перевозке в соответствии с таможенными правилами.\n" +
-      "В случае заказа указанных товаров предусмотрен штраф в размере 10 000 – 50 000 сом.",
-    {
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "💬 Связаться с менеджером", url: "https://wa.me/996550867414" }],
+  const setting = await prisma.setting.findUnique({ where: { key: "forbidden_items" } });
+  const text = setting?.value ?? "⚠️ Информация временно недоступна.";
+
+  await ctx.reply(text, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "Лидия",    url: "https://wa.me/996550867414" },
+          { text: "Виктория", url: "https://wa.me/996556969906" },
         ],
-      },
-    }
-  );
+      ],
+    },
+  });
 }
 
 async function handleAddresses(ctx: Context) {
