@@ -145,12 +145,53 @@ export function createAdminApp() {
   // ── Dashboard ──────────────────────────────────────────────────────────────
 
   app.get("/admin", requireAuth, async (_req, res) => {
-    const [totalUsers, latestUsers] = await Promise.all([
+    const now   = new Date();
+    const sod   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const sow   = new Date(sod); sow.setDate(sod.getDate() - sod.getDay() || 7);
+    const som   = new Date(now.getFullYear(), now.getMonth(), 1);
+    const soy   = new Date(now.getFullYear(), 0, 1);
+
+    const since = (d: Date) => ({ gte: d });
+
+    const [
+      totalUsers, totalPackages,
+      usersDay, usersWeek, usersMonth, usersYear,
+      pkgDay, pkgWeek, pkgMonth, pkgYear,
+      pkgOffice, pkgTransit, pkgDelivered,
+      latestUsers,
+    ] = await Promise.all([
       prisma.user.count(),
+      prisma.package.count(),
+      prisma.user.count({ where: { created_at: since(sod) } }),
+      prisma.user.count({ where: { created_at: since(sow) } }),
+      prisma.user.count({ where: { created_at: since(som) } }),
+      prisma.user.count({ where: { created_at: since(soy) } }),
+      prisma.package.count({ where: { created_at: since(sod) } }),
+      prisma.package.count({ where: { created_at: since(sow) } }),
+      prisma.package.count({ where: { created_at: since(som) } }),
+      prisma.package.count({ where: { created_at: since(soy) } }),
+      prisma.package.count({ where: { status: "IN_OFFICE" } }),
+      prisma.package.count({ where: { status: "IN_TRANSIT" } }),
+      prisma.package.count({ where: { status: "DELIVERED" } }),
       prisma.user.findMany({ orderBy: { created_at: "desc" }, take: 5 }),
     ]);
 
-    const rows = latestUsers.map(u => `
+    const statCard = (label: string, value: number, color = "text-primary") =>
+      `<div class="card stat-card p-3 h-100">
+        <div class="text-muted small mb-1">${label}</div>
+        <div class="fs-3 fw-bold ${color}">${value}</div>
+      </div>`;
+
+    const periodRow = (label: string, day: number, week: number, month: number, year: number) =>
+      `<tr>
+        <td class="fw-semibold">${label}</td>
+        <td class="text-center">${day}</td>
+        <td class="text-center">${week}</td>
+        <td class="text-center">${month}</td>
+        <td class="text-center">${year}</td>
+      </tr>`;
+
+    const userRows = latestUsers.map(u => `
       <tr>
         <td><span class="badge-code">${u.client_code}</span></td>
         <td>${u.full_name}</td>
@@ -161,13 +202,34 @@ export function createAdminApp() {
 
     const body = `
       <div class="row g-3 mb-4">
-        <div class="col-md-3">
-          <div class="card stat-card p-3">
-            <div class="text-muted small">Всего пользователей</div>
-            <div class="fs-2 fw-bold text-primary">${totalUsers}</div>
-          </div>
+        <div class="col-6 col-md-3">${statCard("Всего пользователей", totalUsers)}</div>
+        <div class="col-6 col-md-3">${statCard("Всего посылок", totalPackages, "text-success")}</div>
+        <div class="col-6 col-md-2">${statCard("🏢 В офисе", pkgOffice, "text-warning")}</div>
+        <div class="col-6 col-md-2">${statCard("🚚 В пути", pkgTransit, "text-primary")}</div>
+        <div class="col-6 col-md-2">${statCard("✅ Выдано", pkgDelivered, "text-success")}</div>
+      </div>
+
+      <div class="card stat-card mb-4">
+        <div class="card-header bg-white fw-semibold">📊 Статистика за период</div>
+        <div class="table-responsive">
+          <table class="table mb-0 align-middle text-center">
+            <thead>
+              <tr class="table-light">
+                <th class="text-start">Метрика</th>
+                <th>День</th>
+                <th>Неделя</th>
+                <th>Месяц</th>
+                <th>Год</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${periodRow("👤 Новые пользователи", usersDay, usersWeek, usersMonth, usersYear)}
+              ${periodRow("📦 Новые посылки",       pkgDay,   pkgWeek,   pkgMonth,   pkgYear)}
+            </tbody>
+          </table>
         </div>
       </div>
+
       <div class="card stat-card">
         <div class="card-header bg-white fw-semibold">Последние регистрации</div>
         <div class="table-responsive">
@@ -175,7 +237,7 @@ export function createAdminApp() {
             <thead><tr>
               <th>КОД</th><th>ФИО</th><th>Телефон</th><th>Дата</th><th></th>
             </tr></thead>
-            <tbody>${rows || "<tr><td colspan='5' class='text-center text-muted py-4'>Нет данных</td></tr>"}</tbody>
+            <tbody>${userRows || "<tr><td colspan='5' class='text-center text-muted py-4'>Нет данных</td></tr>"}</tbody>
           </table>
         </div>
       </div>`;
