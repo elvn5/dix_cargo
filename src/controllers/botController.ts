@@ -4,9 +4,7 @@ import path from "path";
 
 type RegStep =
   | { step: "phone" }
-  | { step: "name"; phone: string }
-  | { step: "password"; phone: string; fullName: string }
-  | { step: "confirm"; phone: string; fullName: string; password: string };
+  | { step: "name"; phone: string };
 
 const regState = new Map<number, RegStep>();
 
@@ -299,40 +297,6 @@ export function registerControllers(bot: Bot<Context>): void {
         );
         return;
       }
-      regState.set(senderId, {
-        step: "password",
-        phone: state.phone,
-        fullName: text,
-      });
-      await ctx.reply("🔒 Придумайте пароль:");
-      return;
-    }
-
-    if (state.step === "password") {
-      if (text.length < 6) {
-        await ctx.reply("⚠️ Пароль должен содержать не менее 6 символов.");
-        return;
-      }
-      regState.set(senderId, {
-        step: "confirm",
-        phone: state.phone,
-        fullName: state.fullName,
-        password: text,
-      });
-      await ctx.reply("🔒 Повторите пароль:");
-      return;
-    }
-
-    if (state.step === "confirm") {
-      if (text !== state.password) {
-        await ctx.reply("❌ Пароли не совпадают. Введите пароль заново:");
-        regState.set(senderId, {
-          step: "password",
-          phone: state.phone,
-          fullName: state.fullName,
-        });
-        return;
-      }
 
       regState.delete(senderId);
 
@@ -348,10 +312,7 @@ export function registerControllers(bot: Bot<Context>): void {
               existingUser.full_name,
               existingUser.phone
             ),
-            {
-              parse_mode: "HTML",
-              reply_markup: MENU_KEYBOARD,
-            }
+            { parse_mode: "HTML", reply_markup: MENU_KEYBOARD }
           );
           return;
         }
@@ -359,25 +320,16 @@ export function registerControllers(bot: Bot<Context>): void {
         const newUser = await userService.createUser(
           BigInt(senderId),
           state.phone,
-          state.fullName,
-          state.password
+          text
         );
 
         await ctx.reply(
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
-          {
-            parse_mode: "HTML",
-            reply_markup: MENU_KEYBOARD,
-          }
+          { parse_mode: "HTML", reply_markup: MENU_KEYBOARD }
         );
       } catch (error) {
-        console.error(
-          "[Registration] Ошибка при создании пользователя:",
-          error
-        );
-        await ctx.reply(
-          "⚠️ Произошла ошибка при регистрации. Попробуйте позже."
-        );
+        console.error("[Registration] Ошибка при создании пользователя:", error);
+        await ctx.reply("⚠️ Произошла ошибка при регистрации. Попробуйте позже.");
       }
     }
   });

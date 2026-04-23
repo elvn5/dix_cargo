@@ -279,10 +279,6 @@ export function createAdminApp() {
                 </label>
                 <input name="client_code" class="form-control" placeholder="DIX-001"/>
               </div>
-              <div class="mb-3">
-                <label class="form-label fw-semibold">Пароль</label>
-                <input name="password" type="text" class="form-control" required/>
-              </div>
               <div class="mb-4">
                 <label class="form-label fw-semibold">
                   Telegram ID
@@ -305,11 +301,8 @@ export function createAdminApp() {
   });
 
   app.post("/admin/users/new", requireAuth, async (req, res) => {
-    const { full_name, phone, password, client_code, telegram_id } =
+    const { full_name, phone, client_code, telegram_id } =
       req.body as Record<string, string>;
-
-    const { createHash } = await import("crypto");
-    const passwordHash = createHash("sha256").update(password.trim()).digest("hex");
 
     let code = client_code?.trim();
     if (!code) {
@@ -320,7 +313,7 @@ export function createAdminApp() {
       const lastNumber = lastUser
         ? parseInt(lastUser.client_code.split("-")[1] ?? "0", 10)
         : 0;
-      code = `DIX-${String(lastNumber + 1).padStart(3, "0")}`;
+      code = `DIX-${String(lastNumber + 1).padStart(4, "0")}`;
     }
 
     const tgId = telegram_id?.trim()
@@ -331,7 +324,6 @@ export function createAdminApp() {
       data: {
         full_name: full_name.trim(),
         phone: phone.trim(),
-        password: passwordHash,
         client_code: code,
         telegram_id: tgId,
       },
@@ -365,10 +357,6 @@ export function createAdminApp() {
               <div class="mb-3">
                 <label class="form-label fw-semibold">Телефон</label>
                 <input name="phone" value="${user.phone}" class="form-control" required/>
-              </div>
-              <div class="mb-4">
-                <label class="form-label fw-semibold">Новый пароль <span class="text-muted fw-normal">(оставьте пустым — без изменений)</span></label>
-                <input name="password" type="text" class="form-control" placeholder="Введите новый пароль..."/>
               </div>
               <div class="d-flex gap-2">
                 <button class="btn btn-primary fw-semibold">
@@ -409,16 +397,12 @@ export function createAdminApp() {
   // ── Update user ────────────────────────────────────────────────────────────
 
   app.post("/admin/users/:id", requireAuth, async (req, res) => {
-    const { client_code, full_name, phone, password } = req.body as Record<string, string>;
+    const { client_code, full_name, phone } = req.body as Record<string, string>;
 
-    const data: Record<string, string> = { client_code, full_name, phone };
-
-    if (password?.trim()) {
-      const { createHash } = await import("crypto");
-      data.password = createHash("sha256").update(password.trim()).digest("hex");
-    }
-
-    await prisma.user.update({ where: { id: Number(req.params.id) }, data });
+    await prisma.user.update({
+      where: { id: Number(req.params.id) },
+      data: { client_code, full_name, phone },
+    });
     res.redirect(`/admin/users/${req.params.id}?saved=1`);
   });
 
