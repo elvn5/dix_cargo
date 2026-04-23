@@ -33,21 +33,39 @@ function layout(title: string, body: string, active = ""): string {
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet"/>
   <style>
     body { background:#f0f2f5; }
-    .sidebar { width:240px; min-height:100vh; background:#1a1f36; }
+    .sidebar { width:240px; flex-shrink:0; background:#1a1f36; }
     .sidebar .brand { font-size:1.25rem; font-weight:700; color:#fff; padding:1.5rem 1rem; border-bottom:1px solid #2d3561; }
     .sidebar .nav-link { padding:.6rem 1rem; border-radius:6px; margin:.1rem .5rem; }
     .sidebar .nav-link.active { background:#4e6ef2; color:#fff !important; }
     .sidebar .nav-link:hover:not(.active) { background:#2d3561; color:#fff !important; }
-    .main { flex:1; padding:2rem; }
+    .main { flex:1; padding:2rem; min-width:0; }
     .stat-card { border:none; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,.07); }
     .table th { background:#f8f9fa; font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; }
     .badge-code { background:#e8edff; color:#4e6ef2; font-family:monospace; font-size:.85rem; padding:.3em .6em; border-radius:6px; }
+    .topbar { background:#1a1f36; }
+    @media (max-width:767.98px) {
+      .main { padding:1rem; }
+      .offcanvas.sidebar { width:240px !important; min-height:100vh; }
+    }
+    @media (min-width:768px) {
+      .sidebar { min-height:100vh; display:flex !important; flex-direction:column; }
+    }
   </style>
 </head>
 <body>
+<header class="topbar d-flex d-md-none align-items-center justify-content-between px-3 py-2">
+  <span style="font-size:1.1rem;font-weight:700;color:#fff">✈️ DIX Cargo</span>
+  <button class="border-0 bg-transparent" data-bs-toggle="offcanvas" data-bs-target="#sidebar" style="color:#fff">
+    <i class="bi bi-list fs-3"></i>
+  </button>
+</header>
 <div class="d-flex">
-  <nav class="sidebar d-flex flex-column p-0">
-    <div class="brand">✈️ DIX Cargo</div>
+  <nav class="sidebar offcanvas-md offcanvas-start flex-column p-0" tabindex="-1" id="sidebar">
+    <div class="offcanvas-header d-md-none" style="background:#1a1f36;border-bottom:1px solid #2d3561">
+      <span style="font-size:1.1rem;font-weight:700;color:#fff">✈️ DIX Cargo</span>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" data-bs-target="#sidebar"></button>
+    </div>
+    <div class="brand d-none d-md-block">✈️ DIX Cargo</div>
     <div class="nav flex-column mt-2 gap-1 flex-grow-1">
       ${nav("/admin", "Дашборд", '<i class="bi bi-speedometer2"></i>')}
       ${nav("/admin/users", "Пользователи", '<i class="bi bi-people"></i>')}
@@ -60,8 +78,8 @@ function layout(title: string, body: string, active = ""): string {
       </a>
     </div>
   </nav>
-  <main class="main">
-    <h4 class="mb-4 fw-bold">${title}</h4>
+  <main class="main flex-grow-1">
+    <h4 class="mb-3 fw-bold">${title}</h4>
     ${body}
   </main>
 </div>
@@ -296,17 +314,17 @@ export function createAdminApp() {
 
     const body = `
       <div class="card stat-card">
-        <div class="card-header bg-white d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        <div class="card-header bg-white d-flex flex-column flex-sm-row align-items-start align-items-sm-center justify-content-between gap-2">
           <div class="d-flex align-items-center gap-2">
             <span class="fw-semibold">Пользователи <span class="badge bg-secondary">${total}</span></span>
             <a href="/admin/users/new" class="btn btn-sm btn-primary">
               <i class="bi bi-plus-lg"></i> Добавить
             </a>
           </div>
-          <form method="GET" class="d-flex gap-2">
-            <input name="q" value="${q}" class="form-control form-control-sm" placeholder="Поиск по имени, телефону, коду..." style="width:280px"/>
+          <form method="GET" class="d-flex gap-2 flex-wrap w-100 w-sm-auto">
+            <input name="q" value="${q}" class="form-control form-control-sm" placeholder="Поиск по имени, телефону, коду..." style="min-width:180px"/>
             <button class="btn btn-sm btn-outline-secondary">Найти</button>
-            ${q ? `<a href="/admin/users" class="btn btn-sm btn-outline-secondary">Сбросить</a>` : ""}
+            ${q ? `<a href="/admin/users" class="btn btn-sm btn-outline-secondary">Сброс</a>` : ""}
           </form>
         </div>
         <div class="table-responsive">
@@ -674,27 +692,27 @@ export function createAdminApp() {
       </nav>` : "";
 
     const body = `
-      <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
         <span class="text-muted">${total} посылок</span>
-        <div class="d-flex gap-2">
-          <a href="/admin/packages/import" class="btn btn-outline-success">
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="/admin/packages/import" class="btn btn-outline-success btn-sm">
             <i class="bi bi-file-earmark-excel"></i> Импорт Excel
           </a>
-          <a href="/admin/packages/new" class="btn btn-primary">
-            <i class="bi bi-plus-lg"></i> Добавить посылку
+          <a href="/admin/packages/new" class="btn btn-primary btn-sm">
+            <i class="bi bi-plus-lg"></i> Добавить
           </a>
         </div>
       </div>
       <form method="GET" action="/admin/packages" class="row g-2 mb-3">
-        <div class="col">
+        <div class="col-12 col-sm">
           <input name="search" value="${search}" class="form-control" placeholder="🔍 Поиск по трек-номеру…"/>
         </div>
-        <div class="col-auto">
+        <div class="col-6 col-sm-auto">
           <select name="status" class="form-select">${statusOptions}</select>
         </div>
-        <div class="col-auto">
-          <button class="btn btn-outline-primary">Найти</button>
-          <a href="/admin/packages" class="btn btn-outline-secondary">Сброс</a>
+        <div class="col-6 col-sm-auto d-flex gap-2">
+          <button class="btn btn-outline-primary flex-fill">Найти</button>
+          <a href="/admin/packages" class="btn btn-outline-secondary flex-fill">Сброс</a>
         </div>
       </form>
       <div class="card stat-card">
