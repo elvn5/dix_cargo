@@ -430,10 +430,8 @@ async function handleSupport(ctx: Context) {
       reply_markup: {
         inline_keyboard: [
           [
-            {
-              text: "💬 WhatsApp: +996550867414",
-              url: "https://wa.me/996550867414",
-            },
+            { text: "Лидия",    url: "https://wa.me/996550867414" },
+            { text: "Виктория", url: "https://wa.me/996556969906" },
           ],
           [
             {
