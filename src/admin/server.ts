@@ -625,10 +625,18 @@ export function createAdminApp() {
     const page    = Math.max(1, parseInt(req.query.page as string) || 1);
     const search  = ((req.query.search as string) ?? "").trim();
     const statusQ = (req.query.status as string) ?? "";
+    const dateFrom = (req.query.date_from as string) ?? "";
+    const dateTo   = (req.query.date_to   as string) ?? "";
 
     const where: Record<string, unknown> = {};
     if (search)  where.track_code = { contains: search, mode: "insensitive" };
     if (statusQ) where.status = statusQ;
+    if (dateFrom || dateTo) {
+      const range: Record<string, Date> = {};
+      if (dateFrom) range.gte = new Date(dateFrom);
+      if (dateTo)   range.lte = new Date(dateTo + "T23:59:59.999Z");
+      where.created_at = range;
+    }
 
     const [packages, total] = await Promise.all([
       prisma.package.findMany({
@@ -655,7 +663,7 @@ export function createAdminApp() {
     };
 
     const qs = (extra: Record<string, unknown>) => {
-      const p = new URLSearchParams({ search, status: statusQ, page: String(page), ...extra });
+      const p = new URLSearchParams({ search, status: statusQ, date_from: dateFrom, date_to: dateTo, page: String(page), ...extra });
       return "?" + p.toString();
     };
 
@@ -712,6 +720,12 @@ export function createAdminApp() {
         </div>
         <div class="col-6 col-sm-auto">
           <select name="status" class="form-select">${statusOptions}</select>
+        </div>
+        <div class="col-6 col-sm-auto">
+          <input type="date" name="date_from" value="${dateFrom}" class="form-control" title="Дата от">
+        </div>
+        <div class="col-6 col-sm-auto">
+          <input type="date" name="date_to" value="${dateTo}" class="form-control" title="Дата до">
         </div>
         <div class="col-6 col-sm-auto d-flex gap-2">
           <button class="btn btn-outline-primary flex-fill">Найти</button>
