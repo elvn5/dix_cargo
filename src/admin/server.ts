@@ -514,7 +514,9 @@ export function createAdminApp() {
         <div class="col-lg-6">
           <div class="card stat-card p-4">
             <p class="text-muted small mb-3">
-              Файл Excel с колонками <b>код</b> (DIX****) и <b>трек</b>.<br>
+              Колонка <b>C</b> — код клиента (DIX**** или DIX-****).<br>
+              Колонка <b>D</b> — трек-номер.<br>
+              Строки без DIX-кода в колонке C пропускаются.<br>
               Дата отправки извлекается из имени файла (формат: <code>4月18号…</code>).<br>
               Если дата не найдена — используется сегодняшняя.
             </p>
@@ -552,47 +554,25 @@ export function createAdminApp() {
       shippingDate = new Date();
     }
 
-    // Parse Excel
+    // Parse Excel — column C (index 2) = client code, column D (index 3) = track code
     const wb = XLSX.read(req.file.buffer, { type: "buffer" });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as string[][];
+    const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
 
-    // Find header row containing "код" and "трек"
-    let codeCol = -1, trackCol = -1, headerRow = -1;
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i].map((c) => String(c).trim().toLowerCase());
-      const ci = row.indexOf("код");
-      const ti = row.indexOf("трек");
-      if (ci !== -1 && ti !== -1) {
-        codeCol = ci; trackCol = ti; headerRow = i;
-        break;
-      }
-    }
-
-    if (headerRow === -1) {
-      return res.send(layout("Импорт посылок из Excel",
-        `<div class="alert alert-danger">Не найдены колонки «код» и «трек» в файле.</div>
-         <a href="/admin/packages/import" class="btn btn-secondary">Назад</a>`,
-        "/admin/packages"
-      ));
-    }
+    const DIX_RE = /^DIX-?(\d+)$/i;
 
     let imported = 0, skipped = 0;
     const errors: string[] = [];
 
-    for (let i = headerRow + 1; i < rows.length; i++) {
-      const row = rows[i];
-      const rawCode  = String(row[codeCol] ?? "").trim();
-      const trackCode = String(row[trackCol] ?? "").trim();
+    for (const row of rows) {
+      const rawCode  = String((row as unknown[])[2] ?? "").trim();
+      const trackCode = String((row as unknown[])[3] ?? "").trim();
 
-      if (!rawCode || !trackCode) continue;
+      // Skip rows without a DIX code in column C or empty track in column D
+      if (!DIX_RE.test(rawCode) || !trackCode) continue;
 
-      // Convert DIX1222 → DIX-1222
-      const clientCode = rawCode.match(/^DIX-?\d+$/i)
-        ? rawCode.replace(/^DIX-?(\d+)$/i, (_, n) => `DIX-${n.padStart(4, "0")}`)
-        : null;
-
-      if (!clientCode) { skipped++; continue; }
+      // Normalise: DIX0022 → DIX-0022, DIX-22 → DIX-0022
+      const clientCode = rawCode.replace(DIX_RE, (_, n) => `DIX-${n.padStart(4, "0")}`);
 
       const user = await prisma.user.findUnique({ where: { client_code: clientCode } });
       if (!user) { errors.push(`${clientCode}: пользователь не найден`); skipped++; continue; }
