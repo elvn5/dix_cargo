@@ -28,7 +28,7 @@ async function main() {
   await prisma.$connect();
   console.log("✅ Соединение с базой данных установлено.");
 
-  const { app, port } = createAdminApp();
+  const { app, port } = createAdminApp(bot);
   app.listen(port, () => console.log(`🖥️  Админ-панель: http://localhost:${port}/admin`));
 
   await bot.api.setMyCommands([

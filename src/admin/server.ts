@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import session from "express-session";
 import multer from "multer";
 import * as XLSX from "xlsx";
+import { Bot, Context } from "grammy";
 import prisma from "../database/prismaClient";
 import { userService } from "../services/userService";
 import fs from "fs";
@@ -136,7 +137,24 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
-export function createAdminApp() {
+async function notifyInOffice(bot: Bot<Context>, userId: number, clientCode: string, trackCode: string) {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.telegram_id <= 0n) return;
+    await bot.api.sendMessage(
+      Number(user.telegram_id),
+      `📦 Ваша посылка прибыла в офис!\n\n` +
+      `🪪 Код клиента: <b>${clientCode}</b>\n` +
+      `📬 Трек-номер: <b>${trackCode}</b>\n\n` +
+      `Вы можете забрать её в рабочее время.`,
+      { parse_mode: "HTML" }
+    );
+  } catch (err) {
+    console.error("[Admin] Не удалось отправить уведомление пользователю:", err);
+  }
+}
+
+export function createAdminApp(bot: Bot<Context>) {
   const app = express();
 
   app.use(express.urlencoded({ extended: true }));
@@ -609,6 +627,14 @@ export function createAdminApp() {
         where: { id: { in: idList }, user_id: userId },
         data:  { status: status as "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED" },
       });
+
+      if (status === "IN_OFFICE") {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        const packages = await prisma.package.findMany({ where: { id: { in: idList } } });
+        for (const pkg of packages) {
+          await notifyInOffice(bot, userId, user?.client_code ?? "—", pkg.track_code);
+        }
+      }
     }
     res.redirect(`/admin/users/${userId}?pkg_saved=1`);
   });
@@ -1024,13 +1050,18 @@ export function createAdminApp() {
   app.post("/admin/packages/:id", requireAuth, async (req, res) => {
     const { track_code, status } = req.body as Record<string, string>;
 
-    await prisma.package.update({
+    const pkg = await prisma.package.update({
       where: { id: Number(req.params.id) },
       data: {
         track_code: track_code.trim(),
         status: status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
       },
+      include: { user: true },
     });
+
+    if (status === "IN_OFFICE") {
+      await notifyInOffice(bot, pkg.user_id, pkg.user.client_code, pkg.track_code);
+    }
 
     res.redirect(`/admin/packages/${req.params.id}?saved=1`);
   });
