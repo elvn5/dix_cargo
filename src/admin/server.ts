@@ -419,12 +419,103 @@ export function createAdminApp() {
     const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) } });
     if (!user) return res.redirect("/admin/users");
 
-    const saved = req.query.saved === "1";
-    const dupCode = req.query.error === "duplicate_code";
+    const saved     = req.query.saved === "1";
+    const dupCode   = req.query.error === "duplicate_code";
+    const pkgSaved  = req.query.pkg_saved === "1";
+
+    const packages = await prisma.package.findMany({
+      where: { user_id: user.id },
+      orderBy: { created_at: "desc" },
+    });
+
+    const STATUS_LABEL: Record<string, string> = {
+      IN_OFFICE:  "В офисе",
+      IN_TRANSIT: "В пути",
+      DELIVERED:  "Выдан",
+    };
+    const STATUS_BADGE: Record<string, string> = {
+      IN_OFFICE:  "bg-warning text-dark",
+      IN_TRANSIT: "bg-primary",
+      DELIVERED:  "bg-success",
+    };
+    const statusOptions = (current: string) =>
+      ["IN_TRANSIT", "IN_OFFICE", "DELIVERED"].map(s =>
+        `<option value="${s}" ${s === current ? "selected" : ""}>${STATUS_LABEL[s]}</option>`
+      ).join("");
+
+    const pkgRows = packages.map(p => `
+      <tr>
+        <td class="text-center" style="width:40px">
+          <input type="checkbox" name="ids" value="${p.id}" class="form-check-input pkg-cb">
+        </td>
+        <td class="font-monospace small">${p.track_code}</td>
+        <td><span class="badge ${STATUS_BADGE[p.status]}">${STATUS_LABEL[p.status]}</span></td>
+        <td class="text-muted small">${p.created_at.toLocaleDateString("ru-RU")}</td>
+        <td class="text-muted small">${p.updated_at.toLocaleDateString("ru-RU")}</td>
+      </tr>`).join("");
+
+    const pkgSection = `
+      <div class="card stat-card mt-4">
+        <div class="card-header bg-white d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <span class="fw-semibold">Посылки <span class="badge bg-secondary">${packages.length}</span></span>
+          ${pkgSaved ? `<span class="text-success small"><i class="bi bi-check-circle"></i> Статусы обновлены</span>` : ""}
+        </div>
+        ${packages.length === 0
+          ? `<div class="p-4 text-muted text-center">Посылок нет</div>`
+          : `<form method="POST" action="/admin/users/${user.id}/packages/status">
+              <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                  <thead>
+                    <tr>
+                      <th class="text-center" style="width:40px">
+                        <input type="checkbox" class="form-check-input" id="cb-all" title="Выбрать все">
+                      </th>
+                      <th>Трек-номер</th>
+                      <th>Статус</th>
+                      <th>Дата отправки</th>
+                      <th>Дата поступления</th>
+                    </tr>
+                  </thead>
+                  <tbody>${pkgRows}</tbody>
+                </table>
+              </div>
+              <div class="card-footer bg-white d-flex align-items-center gap-2 flex-wrap">
+                <span class="text-muted small" id="sel-count">Выбрано: 0</span>
+                <select name="status" class="form-select form-select-sm" style="width:auto">
+                  ${statusOptions("")}
+                </select>
+                <button class="btn btn-sm btn-primary fw-semibold" id="apply-btn" disabled>
+                  <i class="bi bi-check2-all"></i> Применить к выбранным
+                </button>
+              </div>
+            </form>`}
+      </div>
+      <script>
+        const cbAll = document.getElementById('cb-all');
+        const cbs = () => [...document.querySelectorAll('.pkg-cb')];
+        const applyBtn = document.getElementById('apply-btn');
+        const selCount = document.getElementById('sel-count');
+
+        function updateState() {
+          const checked = cbs().filter(c => c.checked).length;
+          selCount.textContent = 'Выбрано: ' + checked;
+          applyBtn.disabled = checked === 0;
+          cbAll.indeterminate = checked > 0 && checked < cbs().length;
+          cbAll.checked = checked === cbs().length && cbs().length > 0;
+        }
+
+        cbAll.addEventListener('change', () => {
+          cbs().forEach(c => c.checked = cbAll.checked);
+          updateState();
+        });
+        document.querySelectorAll('.pkg-cb').forEach(c =>
+          c.addEventListener('change', updateState)
+        );
+      </script>`;
 
     const body = `
-      ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
-      ${dupCode ? `<div class="alert alert-danger">Код клиента уже занят — введите другой.</div>` : ""}
+      ${saved    ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
+      ${dupCode  ? `<div class="alert alert-danger">Код клиента уже занят — введите другой.</div>` : ""}
       <div class="row g-4">
         <div class="col-lg-6">
           <div class="card stat-card p-4">
@@ -472,9 +563,26 @@ export function createAdminApp() {
             </form>
           </div>
         </div>
-      </div>`;
+      </div>
+      ${pkgSection}`;
 
     res.send(layout(user.full_name, body, "/admin/users"));
+  });
+
+  app.post("/admin/users/:id/packages/status", requireAuth, async (req, res) => {
+    const userId = Number(req.params.id);
+    const { ids, status } = req.body as { ids: string | string[]; status: string };
+    const validStatuses = ["IN_TRANSIT", "IN_OFFICE", "DELIVERED"];
+    if (!validStatuses.includes(status)) return res.redirect(`/admin/users/${userId}`);
+
+    const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
+    if (idList.length > 0) {
+      await prisma.package.updateMany({
+        where: { id: { in: idList }, user_id: userId },
+        data:  { status: status as "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED" },
+      });
+    }
+    res.redirect(`/admin/users/${userId}?pkg_saved=1`);
   });
 
   // ── Update user ────────────────────────────────────────────────────────────
