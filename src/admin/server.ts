@@ -685,6 +685,12 @@ export function createAdminApp() {
       const user = await prisma.user.findUnique({ where: { client_code: clientCode } });
       if (!user) { errors.push(`${clientCode}: пользователь не найден`); skipped++; continue; }
 
+      // Skip if this track code already exists for this user (any status, including DELIVERED)
+      const exists = await prisma.package.findFirst({
+        where: { user_id: user.id, track_code: trackCode },
+      });
+      if (exists) { skipped++; continue; }
+
       await prisma.package.create({
         data: {
           user_id:    user.id,
@@ -715,10 +721,18 @@ export function createAdminApp() {
     const statusQ = (req.query.status as string) ?? "";
     const dateFrom = (req.query.date_from as string) ?? "";
     const dateTo   = (req.query.date_to   as string) ?? "";
+    const tab      = (req.query.tab as string) === "archive" ? "archive" : "active";
 
     const where: Record<string, unknown> = {};
     if (search)  where.track_code = { contains: search, mode: "insensitive" };
-    if (statusQ) where.status = statusQ;
+
+    if (tab === "archive") {
+      where.status = "DELIVERED";
+    } else {
+      // Active tab: exclude DELIVERED unless admin explicitly filters by it
+      where.status = statusQ && statusQ !== "DELIVERED" ? statusQ : { not: "DELIVERED" };
+    }
+
     if (dateFrom || dateTo) {
       const range: Record<string, Date> = {};
       if (dateFrom) range.gte = new Date(dateFrom);
@@ -751,18 +765,38 @@ export function createAdminApp() {
     };
 
     const qs = (extra: Record<string, unknown>) => {
-      const p = new URLSearchParams({ search, status: statusQ, date_from: dateFrom, date_to: dateTo, page: String(page), ...extra });
+      const p = new URLSearchParams({ search, status: statusQ, date_from: dateFrom, date_to: dateTo, tab, page: String(page), ...extra });
       return "?" + p.toString();
     };
 
-    const statusOptions = [
-      ["", "Все статусы"],
-      ["IN_TRANSIT", "🚚 В пути"],
-      ["IN_OFFICE",  "🏢 В офисе"],
-      ["DELIVERED",  "✅ Выдан"],
-    ].map(([v, l]) =>
-      `<option value="${v}" ${statusQ === v ? "selected" : ""}>${l}</option>`
-    ).join("");
+    const activeCount  = await prisma.package.count({ where: { status: { not: "DELIVERED" } } });
+    const archiveCount = await prisma.package.count({ where: { status: "DELIVERED" } });
+
+    const tabs = `
+      <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+          <a class="nav-link ${tab === "active" ? "active fw-semibold" : ""}"
+             href="/admin/packages?tab=active">
+            📦 Активные <span class="badge ${tab === "active" ? "bg-primary" : "bg-secondary"}">${activeCount}</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link ${tab === "archive" ? "active fw-semibold" : ""}"
+             href="/admin/packages?tab=archive">
+            🗂 Архив <span class="badge ${tab === "archive" ? "bg-primary" : "bg-secondary"}">${archiveCount}</span>
+          </a>
+        </li>
+      </ul>`;
+
+    const statusOptions = tab === "active"
+      ? [
+          ["", "Все активные"],
+          ["IN_TRANSIT", "🚚 В пути"],
+          ["IN_OFFICE",  "🏢 В офисе"],
+        ].map(([v, l]) =>
+          `<option value="${v}" ${statusQ === v ? "selected" : ""}>${l}</option>`
+        ).join("")
+      : "";
 
     const rows = packages.map((p) => `
       <tr>
@@ -791,24 +825,22 @@ export function createAdminApp() {
       </nav>` : "";
 
     const body = `
+      ${tabs}
       <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
         <span class="text-muted">${total} посылок</span>
         <div class="d-flex gap-2 flex-wrap">
           <a href="/admin/packages/import" class="btn btn-outline-success btn-sm">
             <i class="bi bi-file-earmark-excel"></i> Импорт Excel
           </a>
-          <a href="/admin/packages/new" class="btn btn-primary btn-sm">
-            <i class="bi bi-plus-lg"></i> Добавить
-          </a>
+          ${tab === "active" ? `<a href="/admin/packages/new" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Добавить</a>` : ""}
         </div>
       </div>
       <form method="GET" action="/admin/packages" class="row g-2 mb-3">
+        <input type="hidden" name="tab" value="${tab}">
         <div class="col-12 col-sm">
           <input name="search" value="${search}" class="form-control" placeholder="🔍 Поиск по трек-номеру…"/>
         </div>
-        <div class="col-6 col-sm-auto">
-          <select name="status" class="form-select">${statusOptions}</select>
-        </div>
+        ${tab === "active" ? `<div class="col-6 col-sm-auto"><select name="status" class="form-select">${statusOptions}</select></div>` : ""}
         <div class="col-6 col-sm-auto">
           <input type="date" name="date_from" value="${dateFrom}" class="form-control" title="Дата от">
         </div>
