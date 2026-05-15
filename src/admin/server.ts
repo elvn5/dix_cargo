@@ -1021,11 +1021,19 @@ export function createAdminApp() {
 
     const hasFile = (prefix: string) => uploadedFiles.some(f => f.startsWith(prefix + "."));
 
+    const fileZone = (fieldName: string, accept: string, icon: string, hasUploaded: boolean) => `
+      <div class="file-drop-zone" id="zone-${fieldName}" onclick="document.getElementById('inp-${fieldName}').click()">
+        <input type="file" id="inp-${fieldName}" name="${fieldName}" accept="${accept}" class="d-none" onchange="previewFile(this,'zone-${fieldName}')">
+        <div class="file-drop-inner">
+          <i class="bi ${icon} file-drop-icon"></i>
+          <div class="file-drop-text">Нажмите или перетащите файл</div>
+          <div class="file-drop-hint">${hasUploaded ? '<span class="badge bg-success">уже загружено</span>' : '<span class="badge bg-secondary">дефолт</span>'}</div>
+        </div>
+      </div>`;
+
     const sections = MARKETPLACE_KEYS.map(({ key, label }) => {
       const name = key.replace("marketplace_", "");
       const value = (valueMap[key] ?? MARKETPLACE_DEFAULTS[key] ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const photoStatus = hasFile(`${name}_photo`) ? `<span class="badge bg-success">загружено</span>` : `<span class="badge bg-secondary">дефолт</span>`;
-      const videoStatus = hasFile(`${name}_video`) ? `<span class="badge bg-success">загружено</span>` : `<span class="badge bg-secondary">дефолт</span>`;
       return `
         <div class="mb-5 pb-4 border-bottom">
           <h5 class="fw-bold mb-3">${label}</h5>
@@ -1036,18 +1044,81 @@ export function createAdminApp() {
           </div>
           <div class="row g-3">
             <div class="col-sm-6">
-              <label class="form-label fw-semibold">Фото ${photoStatus}</label>
-              <input type="file" name="${name}_photo" class="form-control" accept="image/*">
+              <label class="form-label fw-semibold mb-2">📷 Фото</label>
+              ${fileZone(`${name}_photo`, "image/*", "bi-image", hasFile(`${name}_photo`))}
             </div>
             <div class="col-sm-6">
-              <label class="form-label fw-semibold">Видео ${videoStatus}</label>
-              <input type="file" name="${name}_video" class="form-control" accept="video/*">
+              <label class="form-label fw-semibold mb-2">🎬 Видео</label>
+              ${fileZone(`${name}_video`, "video/*", "bi-camera-video", hasFile(`${name}_video`))}
             </div>
           </div>
         </div>`;
     }).join("");
 
+    const fileDropStyles = `
+      <style>
+        .file-drop-zone {
+          border: 2px dashed #ced4da;
+          border-radius: 12px;
+          padding: 1.5rem 1rem;
+          text-align: center;
+          cursor: pointer;
+          transition: border-color .2s, background .2s;
+          background: #f8f9fa;
+          user-select: none;
+        }
+        .file-drop-zone:hover, .file-drop-zone.drag-over {
+          border-color: #4e6ef2;
+          background: #eef0fd;
+        }
+        .file-drop-zone.has-file {
+          border-color: #198754;
+          background: #f0faf4;
+        }
+        .file-drop-icon {
+          font-size: 2rem;
+          color: #adb5bd;
+          display: block;
+          margin-bottom: .5rem;
+          transition: color .2s;
+        }
+        .file-drop-zone:hover .file-drop-icon,
+        .file-drop-zone.drag-over .file-drop-icon { color: #4e6ef2; }
+        .file-drop-zone.has-file .file-drop-icon { color: #198754; }
+        .file-drop-text { font-size: .875rem; color: #495057; font-weight: 500; }
+        .file-drop-hint { font-size: .75rem; color: #6c757d; margin-top: .35rem; }
+        .file-drop-filename { font-size: .8rem; color: #198754; font-weight: 600; margin-top: .4rem; word-break: break-all; }
+      </style>`;
+
+    const fileDropScript = `
+      <script>
+        function previewFile(input, zoneId) {
+          const zone = document.getElementById(zoneId);
+          const file = input.files[0];
+          if (!file) return;
+          zone.classList.add('has-file');
+          let hint = zone.querySelector('.file-drop-hint');
+          hint.innerHTML = '<span class="badge bg-success">выбрано</span>';
+          let name = zone.querySelector('.file-drop-filename');
+          if (!name) { name = document.createElement('div'); name.className = 'file-drop-filename'; zone.querySelector('.file-drop-inner').appendChild(name); }
+          name.textContent = file.name;
+        }
+        document.querySelectorAll('.file-drop-zone').forEach(zone => {
+          zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+          zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+          zone.addEventListener('drop', e => {
+            e.preventDefault();
+            zone.classList.remove('drag-over');
+            const id = zone.id.replace('zone-', 'inp-');
+            const input = document.getElementById(id);
+            const dt = e.dataTransfer;
+            if (dt.files.length) { input.files = dt.files; previewFile(input, zone.id); }
+          });
+        });
+      </script>`;
+
     const body = `
+      ${fileDropStyles}
       ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
       <div class="row g-4">
         <div class="col-lg-9">
@@ -1060,7 +1131,8 @@ export function createAdminApp() {
             </form>
           </div>
         </div>
-      </div>`;
+      </div>
+      ${fileDropScript}`;
 
     res.send(layout("Маркетплейсы", body, "/admin/marketplaces"));
   });
