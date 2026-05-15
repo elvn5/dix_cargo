@@ -30,6 +30,12 @@ async function findUserByTelegramId(telegramId: bigint): Promise<User | null> {
   });
 }
 
+async function findUserByPhone(phone: string): Promise<User | null> {
+  return prisma.user.findFirst({
+    where: { phone },
+  });
+}
+
 async function createUser(
   telegramId: bigint,
   phone: string,
@@ -49,6 +55,7 @@ async function createUser(
 
 export const userService = {
   findUserByTelegramId,
+  findUserByPhone,
   createUser,
   generateClientCode,
   generateUniqueClientCode,
