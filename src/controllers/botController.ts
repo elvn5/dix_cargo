@@ -64,14 +64,20 @@ const MENU_KEYBOARD = {
   persistent: true,
 };
 
-const MANAGERS_KEYBOARD = {
-  inline_keyboard: [
-    [
-      { text: "Лидия",    url: "https://wa.me/996550867414" },
-      { text: "Виктория", url: "https://wa.me/996556969906" },
-    ],
-  ],
-};
+async function getManagersKeyboard() {
+  const settings = await prisma.setting.findMany({
+    where: { key: { in: ["manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"] } },
+  });
+  const s: Record<string, string> = {};
+  for (const row of settings) s[row.key] = row.value;
+
+  return {
+    inline_keyboard: [[
+      { text: s.manager_1_name || "Лидия",    url: s.manager_1_url || "https://wa.me/996550867414" },
+      { text: s.manager_2_name || "Виктория", url: s.manager_2_url || "https://wa.me/996556969906" },
+    ]],
+  };
+}
 
 function buildProfile(code: string, fullName: string, phone: string): string {
   return (
@@ -230,7 +236,7 @@ export function registerControllers(bot: Bot<Context>): void {
       await ctx.replyWithVideo(new InputFile(resolveMarketplaceFile(settingKey, "video")));
 
       await ctx.reply("📩 Готово? Отправьте скриншот на проверку:", {
-        reply_markup: MANAGERS_KEYBOARD,
+        reply_markup: await getManagersKeyboard(),
       });
     });
   }
@@ -445,7 +451,7 @@ export function registerControllers(bot: Bot<Context>): void {
 
         await ctx.reply(
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
-          { parse_mode: "HTML", reply_markup: MANAGERS_KEYBOARD }
+          { parse_mode: "HTML", reply_markup: await getManagersKeyboard() }
         );
         await ctx.reply("Выберите раздел:", { reply_markup: MENU_KEYBOARD });
       } catch (error) {
@@ -482,14 +488,7 @@ async function handleForbidden(ctx: Context) {
 
   await ctx.reply(text, {
     parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "Лидия",    url: "https://wa.me/996550867414" },
-          { text: "Виктория", url: "https://wa.me/996556969906" },
-        ],
-      ],
-    },
+    reply_markup: await getManagersKeyboard(),
   });
 }
 
@@ -539,6 +538,7 @@ async function handleProfile(ctx: Context) {
 }
 
 async function handleSupport(ctx: Context) {
+  const managersKb = await getManagersKeyboard();
   await ctx.reply(
     "💬 <b>Поддержка</b>\n\nСвяжитесь с нами любым удобным способом:\n\n" +
       "📍 Адрес: Бишкек, Айбек-Ата 1/2\n" +
@@ -548,16 +548,8 @@ async function handleSupport(ctx: Context) {
       parse_mode: "HTML",
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: "Лидия",    url: "https://wa.me/996550867414" },
-            { text: "Виктория", url: "https://wa.me/996556969906" },
-          ],
-          [
-            {
-              text: "📸 Instagram: dix_cargo",
-              url: "https://www.instagram.com/dix_cargo/",
-            },
-          ],
+          managersKb.inline_keyboard[0],
+          [{ text: "📸 Instagram: dix_cargo", url: "https://www.instagram.com/dix_cargo/" }],
           [{ text: "✈️ Telegram канал", url: "https://t.me/dixcargo" }],
         ],
       },

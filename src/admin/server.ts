@@ -882,20 +882,42 @@ export function createAdminApp() {
 
   app.get("/admin/settings", requireAuth, async (req, res) => {
     const saved = req.query.saved === "1";
-    const setting = await prisma.setting.findUnique({ where: { key: "forbidden_items" } });
+    const settings = await prisma.setting.findMany({
+      where: { key: { in: ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"] } },
+    });
+    const s: Record<string, string> = {};
+    for (const row of settings) s[row.key] = row.value;
 
     const body = `
       ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
       <div class="row g-4">
         <div class="col-lg-8">
-          <div class="card stat-card p-4">
+          <div class="card stat-card p-4 mb-4">
             <form method="POST" action="/admin/settings">
+              <h5 class="fw-bold mb-3">👥 Кнопки менеджеров</h5>
+              <div class="row g-3 mb-4">
+                <div class="col-sm-3">
+                  <label class="form-label fw-semibold">Менеджер 1 — имя</label>
+                  <input type="text" name="manager_1_name" class="form-control" value="${s.manager_1_name ?? "Лидия"}" placeholder="Лидия">
+                </div>
+                <div class="col-sm-9">
+                  <label class="form-label fw-semibold">Менеджер 1 — ссылка</label>
+                  <input type="url" name="manager_1_url" class="form-control" value="${s.manager_1_url ?? "https://wa.me/996550867414"}" placeholder="https://wa.me/...">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label fw-semibold">Менеджер 2 — имя</label>
+                  <input type="text" name="manager_2_name" class="form-control" value="${s.manager_2_name ?? "Виктория"}" placeholder="Виктория">
+                </div>
+                <div class="col-sm-9">
+                  <label class="form-label fw-semibold">Менеджер 2 — ссылка</label>
+                  <input type="url" name="manager_2_url" class="form-control" value="${s.manager_2_url ?? "https://wa.me/996556969906"}" placeholder="https://wa.me/...">
+                </div>
+              </div>
+              <hr class="my-4">
+              <h5 class="fw-bold mb-3">🚫 Запрещённые товары</h5>
               <div class="mb-3">
-                <label class="form-label fw-semibold">
-                  🚫 Текст «Запрещённые товары»
-                  <span class="text-muted fw-normal small">— поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;)</span>
-                </label>
-                <textarea name="forbidden_items" class="form-control font-monospace" rows="20" required>${setting?.value ?? ""}</textarea>
+                <label class="form-label text-muted small">Поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;)</label>
+                <textarea name="forbidden_items" class="form-control font-monospace" rows="18" required>${s.forbidden_items ?? ""}</textarea>
               </div>
               <button class="btn btn-primary fw-semibold">
                 <i class="bi bi-check-lg"></i> Сохранить
@@ -909,14 +931,17 @@ export function createAdminApp() {
   });
 
   app.post("/admin/settings", requireAuth, async (req, res) => {
-    const { forbidden_items } = req.body as Record<string, string>;
-
-    await prisma.setting.upsert({
-      where: { key: "forbidden_items" },
-      update: { value: forbidden_items },
-      create: { key: "forbidden_items", value: forbidden_items },
-    });
-
+    const body = req.body as Record<string, string>;
+    const keys = ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"];
+    for (const key of keys) {
+      if (typeof body[key] === "string") {
+        await prisma.setting.upsert({
+          where:  { key },
+          update: { value: body[key] },
+          create: { key, value: body[key] },
+        });
+      }
+    }
     res.redirect("/admin/settings?saved=1");
   });
 
