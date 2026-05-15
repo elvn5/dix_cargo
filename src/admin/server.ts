@@ -117,13 +117,36 @@ function loginPage(error = ""): string {
         <label class="form-label fw-semibold">Email</label>
         <input type="email" name="email" class="form-control" required autofocus/>
       </div>
-      <div class="mb-4">
+      <div class="mb-3">
         <label class="form-label fw-semibold">Пароль</label>
-        <input type="password" name="password" class="form-control" required/>
+        <div class="input-group">
+          <input type="password" id="password" name="password" class="form-control" required/>
+          <button type="button" class="btn btn-outline-secondary" id="togglePwd" tabindex="-1"
+            style="border-color:#dee2e6">
+            <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.1 13.1 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5s3.879 1.168 5.168 2.457A13.1 13.1 0 0 1 14.828 8a13.1 13.1 0 0 1-1.66 2.043C11.879 11.332 10.12 12.5 8 12.5s-3.879-1.168-5.168-2.457A13.1 13.1 0 0 1 1.172 8z"/>
+              <path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="mb-4 form-check">
+        <input type="checkbox" class="form-check-input" id="remember" name="remember" value="1"/>
+        <label class="form-check-label text-muted" for="remember">Запомнить меня на 30 дней</label>
       </div>
       <button class="btn btn-primary w-100 fw-semibold">Войти</button>
     </form>
   </div>
+  <script>
+    document.getElementById('togglePwd').addEventListener('click', function() {
+      const pwd = document.getElementById('password');
+      const isText = pwd.type === 'text';
+      pwd.type = isText ? 'password' : 'text';
+      document.getElementById('eyeIcon').innerHTML = isText
+        ? '<path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.1 13.1 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5s3.879 1.168 5.168 2.457A13.1 13.1 0 0 1 14.828 8a13.1 13.1 0 0 1-1.66 2.043C11.879 11.332 10.12 12.5 8 12.5s-3.879-1.168-5.168-2.457A13.1 13.1 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/>'
+        : '<path d="M13.359 11.238C15.06 9.72 16 8 16 8s-3-5.5-8-5.5a7.03 7.03 0 0 0-2.79.588l.77.771A5.944 5.944 0 0 1 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.134 13.134 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755-.165.165-.337.328-.517.486z"/><path d="M11.297 9.176a3.5 3.5 0 0 0-4.474-4.474l.823.823a2.5 2.5 0 0 1 2.829 2.829zm-2.943 1.299.822.822a3.5 3.5 0 0 1-4.474-4.474l.823.823a2.5 2.5 0 0 0 2.829 2.829z"/><path d="M3.35 5.47c-.18.16-.353.322-.518.487A13.134 13.134 0 0 0 1.172 8l.195.288c.335.48.83 1.12 1.465 1.755C4.121 11.332 5.881 12.5 8 12.5c.716 0 1.39-.133 2.02-.36l.77.772A7.029 7.029 0 0 1 8 13.5C3 13.5 0 8 0 8s.939-1.721 2.641-3.238l.708.709z"/><path d="M13.646 14.354l-12-12 .708-.708 12 12-.708.708z"/>';
+    });
+  </script>
 </body>
 </html>`;
 }
@@ -170,9 +193,12 @@ export function createAdminApp(bot: Bot<Context>) {
   app.get("/admin/login", (_req, res) => res.send(loginPage()));
 
   app.post("/admin/login", (req, res) => {
-    const { email, password } = req.body as { email: string; password: string };
+    const { email, password, remember } = req.body as { email: string; password: string; remember?: string };
     if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
       req.session.admin = true;
+      if (remember === "1") {
+        req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+      }
       return res.redirect("/admin");
     }
     res.send(loginPage("Неверный email или пароль"));
