@@ -242,48 +242,74 @@ export function registerControllers(bot: Bot<Context>): void {
   }
 
   // ── Фильтр посылок ────────────────────────────────────────────────────────────
-  bot.callbackQuery(/^pkg_filter:(.+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
+  const STATUS_LABEL: Record<string, string> = {
+    IN_OFFICE:  "🏢 В офисе",
+    IN_TRANSIT: "🚚 В пути",
+    DELIVERED:  "✅ Выдан",
+  };
 
-    const telegramId = ctx.from?.id;
-    const user = telegramId
-      ? await userService.findUserByTelegramId(BigInt(telegramId))
-      : null;
+  const PKG_PAGE_SIZE = 5;
 
-    if (!user) {
-      await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
-      return;
-    }
+  async function showPackagesPage(
+    ctx: Context,
+    userId: number,
+    status: "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+    page: number
+  ) {
+    const total = await prisma.package.count({ where: { user_id: userId, status } });
 
-    const status = ctx.match[1] as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
-
-    const STATUS_LABEL: Record<string, string> = {
-      IN_OFFICE:  "🏢 В офисе",
-      IN_TRANSIT: "🚚 В пути",
-      DELIVERED:  "✅ Выдан",
-    };
-
-    const packages = await prisma.package.findMany({
-      where: { user_id: user.id, status },
-      orderBy: { created_at: "desc" },
-    });
-
-    if (packages.length === 0) {
+    if (total === 0) {
       await ctx.reply(`${STATUS_LABEL[status]}: посылок нет.`);
       return;
     }
 
+    const totalPages = Math.ceil(total / PKG_PAGE_SIZE);
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+
+    const packages = await prisma.package.findMany({
+      where: { user_id: userId, status },
+      orderBy: { created_at: "desc" },
+      skip: safePage * PKG_PAGE_SIZE,
+      take: PKG_PAGE_SIZE,
+    });
+
     const lines = packages.map((p) =>
-      `📦 ${p.track_code}\n` +
-      `Статус посылки: ${STATUS_LABEL[status].replace(/^\S+\s/, "")}\n` +
+      `📦 <b>${p.track_code}</b>\n` +
+      `Статус: ${STATUS_LABEL[status].replace(/^\S+\s/, "")}\n` +
       `Дата отправки: ${p.created_at.toLocaleDateString("ru-RU")}\n` +
       `Дата поступления: ${p.updated_at.toLocaleDateString("ru-RU")}`
     ).join("\n\n");
 
-    await ctx.reply(
-      `${STATUS_LABEL[status]} — ${packages.length} шт.\n\n${lines}`,
-      { parse_mode: "HTML" }
-    );
+    const header = `${STATUS_LABEL[status]} — ${total} шт. (стр. ${safePage + 1}/${totalPages})\n\n`;
+
+    const navRow: { text: string; callback_data: string }[] = [];
+    if (safePage > 0)
+      navRow.push({ text: "← Назад", callback_data: `pkg_page:${status}:${safePage - 1}` });
+    if (safePage < totalPages - 1)
+      navRow.push({ text: "Вперёд →", callback_data: `pkg_page:${status}:${safePage + 1}` });
+
+    const keyboard = navRow.length > 0 ? { inline_keyboard: [navRow] } : undefined;
+
+    await ctx.reply(header + lines, { parse_mode: "HTML", reply_markup: keyboard });
+  }
+
+  bot.callbackQuery(/^pkg_filter:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const telegramId = ctx.from?.id;
+    const user = telegramId ? await userService.findUserByTelegramId(BigInt(telegramId)) : null;
+    if (!user) { await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start."); return; }
+    const status = ctx.match[1] as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
+    await showPackagesPage(ctx, user.id, status, 0);
+  });
+
+  bot.callbackQuery(/^pkg_page:(\w+):(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const telegramId = ctx.from?.id;
+    const user = telegramId ? await userService.findUserByTelegramId(BigInt(telegramId)) : null;
+    if (!user) { await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start."); return; }
+    const status = ctx.match[1] as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
+    const page = parseInt(ctx.match[2], 10);
+    await showPackagesPage(ctx, user.id, status, page);
   });
 
   // ── Поиск по трек-номеру ─────────────────────────────────────────────────────
