@@ -70,6 +70,7 @@ function layout(title: string, body: string, active = ""): string {
       ${nav("/admin", "Дашборд", '<i class="bi bi-speedometer2"></i>')}
       ${nav("/admin/users", "Пользователи", '<i class="bi bi-people"></i>')}
       ${nav("/admin/packages", "Посылки", '<i class="bi bi-box-seam"></i>')}
+      ${nav("/admin/marketplaces", "Маркетплейсы", '<i class="bi bi-shop"></i>')}
       ${nav("/admin/settings", "Настройки бота", '<i class="bi bi-gear"></i>')}
     </div>
     <div class="p-3 border-top border-secondary">
@@ -915,6 +916,88 @@ export function createAdminApp() {
     });
 
     res.redirect("/admin/settings?saved=1");
+  });
+
+  // ── Маркетплейсы ──────────────────────────────────────────────────────────
+
+  const MARKETPLACE_KEYS = [
+    { key: "marketplace_pinduoduo", label: "Pinduoduo" },
+    { key: "marketplace_taobao",    label: "TaoBao" },
+    { key: "marketplace_1688",      label: "1688" },
+    { key: "marketplace_poizon",    label: "Poizon" },
+  ];
+
+  const MARKETPLACE_DEFAULTS: Record<string, string> = {
+    marketplace_pinduoduo:
+      `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+      `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+      `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+      `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+    marketplace_taobao:
+      `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+      `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+      `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+      `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+    marketplace_1688:
+      `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+      `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+      `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+      `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+    marketplace_poizon:
+      `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+      `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+      `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+      `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+  };
+
+  app.get("/admin/marketplaces", requireAuth, async (req, res) => {
+    const saved = req.query.saved === "1";
+    const settings = await prisma.setting.findMany({
+      where: { key: { in: MARKETPLACE_KEYS.map(m => m.key) } },
+    });
+    const valueMap: Record<string, string> = {};
+    for (const s of settings) valueMap[s.key] = s.value;
+
+    const textareas = MARKETPLACE_KEYS.map(({ key, label }) => {
+      const value = (valueMap[key] ?? MARKETPLACE_DEFAULTS[key] ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `
+        <div class="mb-4">
+          <label class="form-label fw-semibold fs-6">${label}</label>
+          <div class="text-muted small mb-1">Поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;). Используйте <code>{code}</code> для подстановки кода клиента.</div>
+          <textarea name="${key}" class="form-control font-monospace" rows="8">${value}</textarea>
+        </div>`;
+    }).join("");
+
+    const body = `
+      ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
+      <div class="row g-4">
+        <div class="col-lg-9">
+          <div class="card stat-card p-4">
+            <form method="POST" action="/admin/marketplaces">
+              ${textareas}
+              <button class="btn btn-primary fw-semibold">
+                <i class="bi bi-check-lg"></i> Сохранить все
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>`;
+
+    res.send(layout("Маркетплейсы", body, "/admin/marketplaces"));
+  });
+
+  app.post("/admin/marketplaces", requireAuth, async (req, res) => {
+    const body = req.body as Record<string, string>;
+    for (const { key } of MARKETPLACE_KEYS) {
+      if (typeof body[key] === "string") {
+        await prisma.setting.upsert({
+          where:  { key },
+          update: { value: body[key] },
+          create: { key, value: body[key] },
+        });
+      }
+    }
+    res.redirect("/admin/marketplaces?saved=1");
   });
 
   // ── Root redirect ──────────────────────────────────────────────────────────

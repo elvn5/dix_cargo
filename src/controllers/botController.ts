@@ -3,6 +3,35 @@ import { userService } from "../services/userService";
 import prisma from "../database/prismaClient";
 import path from "path";
 
+const MARKETPLACE_DEFAULTS: Record<string, string> = {
+  marketplace_pinduoduo:
+    `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+    `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+    `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+    `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+  marketplace_taobao:
+    `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+    `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+    `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+    `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+  marketplace_1688:
+    `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+    `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+    `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+    `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+  marketplace_poizon:
+    `<code>八 {code}\n广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n13763369694 八{code}</code>\n\n` +
+    `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
+    `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
+    `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
+};
+
+async function getMarketplaceText(settingKey: string, code: string): Promise<string> {
+  const setting = await prisma.setting.findUnique({ where: { key: settingKey } });
+  const template = setting?.value ?? MARKETPLACE_DEFAULTS[settingKey] ?? "";
+  return template.replace(/\{code\}/g, code);
+}
+
 type RegStep =
   | { step: "phone" }
   | { step: "name"; phone: string }
@@ -161,43 +190,16 @@ export function registerControllers(bot: Bot<Context>): void {
   });
 
 
-  // ── Адрес Pinduoduo ───────────────────────────────────────────────────────────
-  bot.callbackQuery("address_pinduoduo", async (ctx) => {
-    await ctx.answerCallbackQuery();
+  // ── Адреса маркетплейсов ──────────────────────────────────────────────────────
+  const MARKETPLACE_CALLBACKS: Record<string, string> = {
+    address_pinduoduo: "marketplace_pinduoduo",
+    address_taobao:    "marketplace_taobao",
+    address_1688:      "marketplace_1688",
+    address_poizon:    "marketplace_poizon",
+  };
 
-    const telegramId = ctx.from?.id;
-    const user = telegramId
-      ? await userService.findUserByTelegramId(BigInt(telegramId))
-      : null;
-    const code = user?.client_code ?? "????";
-
-    const addressLines =
-      `八 ${code}\n` +
-      `广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n` +
-      `13763369694 八${code}`;
-
-    const infoText =
-      `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
-      `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
-      `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`;
-
-    await ctx.reply(`<code>${addressLines}</code>\n\n${infoText}`, {
-      parse_mode: "HTML",
-    });
-
-    const photoPath = path.join(__dirname, "../assets/pinduoduo_photo.jpg");
-    await ctx.replyWithPhoto(new InputFile(photoPath));
-
-    const videoPath = path.join(__dirname, "../assets/pinduoduo_video.MP4");
-    await ctx.replyWithVideo(new InputFile(videoPath));
-
-    await ctx.reply("📩 Готово? Отправьте скриншот на проверку:", {
-      reply_markup: MANAGERS_KEYBOARD,
-    });
-  });
-
-  for (const key of ["address_taobao", "address_1688", "address_poizon"] as const) {
-    bot.callbackQuery(key, async (ctx) => {
+  for (const [callbackKey, settingKey] of Object.entries(MARKETPLACE_CALLBACKS)) {
+    bot.callbackQuery(callbackKey, async (ctx) => {
       await ctx.answerCallbackQuery();
 
       const telegramId = ctx.from?.id;
@@ -206,17 +208,8 @@ export function registerControllers(bot: Bot<Context>): void {
         : null;
       const code = user?.client_code ?? "????";
 
-      const addressLines =
-        `八 ${code}\n` +
-        `广东省佛山市南海区里水镇大石社区石紫岗工业区石一石二工业路27号321国际仓\n` +
-        `13763369694 八${code}`;
-
-      const infoText =
-        `Скопируйте адрес и вставьте в приложении. Сверьте с шаблоном ниже.\n` +
-        `Чтобы ваши посылки не потерялись, обязательно отправьте скриншот заполненного адреса на проверку и получите подтверждение от нашего менеджера.\n` +
-        `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`;
-
-      await ctx.reply(`<code>${addressLines}</code>\n\n${infoText}`, { parse_mode: "HTML" });
+      const text = await getMarketplaceText(settingKey, code);
+      await ctx.reply(text, { parse_mode: "HTML" });
 
       const photoPath = path.join(__dirname, "../assets/pinduoduo_photo.jpg");
       await ctx.replyWithPhoto(new InputFile(photoPath));
