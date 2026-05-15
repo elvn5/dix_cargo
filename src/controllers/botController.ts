@@ -2,6 +2,7 @@ import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
 import prisma from "../database/prismaClient";
 import path from "path";
+import fs from "fs";
 
 const MARKETPLACE_DEFAULTS: Record<string, string> = {
   marketplace_pinduoduo:
@@ -30,6 +31,20 @@ async function getMarketplaceText(settingKey: string, code: string): Promise<str
   const setting = await prisma.setting.findUnique({ where: { key: settingKey } });
   const template = setting?.value ?? MARKETPLACE_DEFAULTS[settingKey] ?? "";
   return template.replace(/\{code\}/g, code);
+}
+
+function resolveMarketplaceFile(settingKey: string, type: "photo" | "video"): string {
+  const name = settingKey.replace("marketplace_", "");
+  const uploadsDir = "/app/uploads";
+  try {
+    const files = fs.readdirSync(uploadsDir);
+    const found = files.find(f => f.startsWith(`${name}_${type}.`));
+    if (found) return path.join(uploadsDir, found);
+  } catch {}
+  // fallback to bundled asset
+  return type === "photo"
+    ? path.join(__dirname, "../assets/pinduoduo_photo.jpg")
+    : path.join(__dirname, "../assets/pinduoduo_video.MP4");
 }
 
 type RegStep =
@@ -211,11 +226,8 @@ export function registerControllers(bot: Bot<Context>): void {
       const text = await getMarketplaceText(settingKey, code);
       await ctx.reply(text, { parse_mode: "HTML" });
 
-      const photoPath = path.join(__dirname, "../assets/pinduoduo_photo.jpg");
-      await ctx.replyWithPhoto(new InputFile(photoPath));
-
-      const videoPath = path.join(__dirname, "../assets/pinduoduo_video.MP4");
-      await ctx.replyWithVideo(new InputFile(videoPath));
+      await ctx.replyWithPhoto(new InputFile(resolveMarketplaceFile(settingKey, "photo")));
+      await ctx.replyWithVideo(new InputFile(resolveMarketplaceFile(settingKey, "video")));
 
       await ctx.reply("📩 Готово? Отправьте скриншот на проверку:", {
         reply_markup: MANAGERS_KEYBOARD,

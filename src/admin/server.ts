@@ -4,6 +4,8 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import prisma from "../database/prismaClient";
 import { userService } from "../services/userService";
+import fs from "fs";
+import path from "path";
 
 declare module "express-session" {
   interface SessionData {
@@ -950,6 +952,37 @@ export function createAdminApp() {
       `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
   };
 
+  const UPLOADS_DIR = "/app/uploads";
+
+  const marketplaceUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+        cb(null, UPLOADS_DIR);
+      },
+      filename: (req, file, cb) => {
+        const fieldname = file.fieldname; // e.g. "pinduoduo_photo" or "pinduoduo_video"
+        const ext = path.extname(file.originalname).toLowerCase() || (file.mimetype.startsWith("video") ? ".mp4" : ".jpg");
+        // Delete any previous file for this field
+        const prefix = fieldname;
+        try {
+          const existing = fs.readdirSync(UPLOADS_DIR).filter(f => f.startsWith(prefix + "."));
+          for (const f of existing) fs.unlinkSync(path.join(UPLOADS_DIR, f));
+        } catch {}
+        cb(null, `${fieldname}${ext}`);
+      },
+    }),
+    limits: { fileSize: 50 * 1024 * 1024 },
+  });
+
+  const marketplaceFields = MARKETPLACE_KEYS.flatMap(({ key }) => {
+    const name = key.replace("marketplace_", "");
+    return [
+      { name: `${name}_photo`, maxCount: 1 },
+      { name: `${name}_video`, maxCount: 1 },
+    ];
+  });
+
   app.get("/admin/marketplaces", requireAuth, async (req, res) => {
     const saved = req.query.saved === "1";
     const settings = await prisma.setting.findMany({
@@ -958,13 +991,34 @@ export function createAdminApp() {
     const valueMap: Record<string, string> = {};
     for (const s of settings) valueMap[s.key] = s.value;
 
-    const textareas = MARKETPLACE_KEYS.map(({ key, label }) => {
+    let uploadedFiles: string[] = [];
+    try { uploadedFiles = fs.readdirSync(UPLOADS_DIR); } catch {}
+
+    const hasFile = (prefix: string) => uploadedFiles.some(f => f.startsWith(prefix + "."));
+
+    const sections = MARKETPLACE_KEYS.map(({ key, label }) => {
+      const name = key.replace("marketplace_", "");
       const value = (valueMap[key] ?? MARKETPLACE_DEFAULTS[key] ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const photoStatus = hasFile(`${name}_photo`) ? `<span class="badge bg-success">загружено</span>` : `<span class="badge bg-secondary">дефолт</span>`;
+      const videoStatus = hasFile(`${name}_video`) ? `<span class="badge bg-success">загружено</span>` : `<span class="badge bg-secondary">дефолт</span>`;
       return `
-        <div class="mb-4">
-          <label class="form-label fw-semibold fs-6">${label}</label>
-          <div class="text-muted small mb-1">Поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;). Используйте <code>{code}</code> для подстановки кода клиента.</div>
-          <textarea name="${key}" class="form-control font-monospace" rows="8">${value}</textarea>
+        <div class="mb-5 pb-4 border-bottom">
+          <h5 class="fw-bold mb-3">${label}</h5>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Текст сообщения</label>
+            <div class="text-muted small mb-1">Поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;). Используйте <code>{code}</code> для кода клиента.</div>
+            <textarea name="${key}" class="form-control font-monospace" rows="7">${value}</textarea>
+          </div>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Фото ${photoStatus}</label>
+              <input type="file" name="${name}_photo" class="form-control" accept="image/*">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Видео ${videoStatus}</label>
+              <input type="file" name="${name}_video" class="form-control" accept="video/*">
+            </div>
+          </div>
         </div>`;
     }).join("");
 
@@ -973,8 +1027,8 @@ export function createAdminApp() {
       <div class="row g-4">
         <div class="col-lg-9">
           <div class="card stat-card p-4">
-            <form method="POST" action="/admin/marketplaces">
-              ${textareas}
+            <form method="POST" action="/admin/marketplaces" enctype="multipart/form-data">
+              ${sections}
               <button class="btn btn-primary fw-semibold">
                 <i class="bi bi-check-lg"></i> Сохранить все
               </button>
@@ -986,7 +1040,7 @@ export function createAdminApp() {
     res.send(layout("Маркетплейсы", body, "/admin/marketplaces"));
   });
 
-  app.post("/admin/marketplaces", requireAuth, async (req, res) => {
+  app.post("/admin/marketplaces", requireAuth, marketplaceUpload.fields(marketplaceFields), async (req, res) => {
     const body = req.body as Record<string, string>;
     for (const { key } of MARKETPLACE_KEYS) {
       if (typeof body[key] === "string") {

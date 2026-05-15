@@ -30,7 +30,11 @@ services:
       ADMIN_PORT: ${ADMIN_PORT:-3000}
     ports:
       - "${ADMIN_PORT:-3000}:${ADMIN_PORT:-3000}"
+    volumes:
+      - marketplace_uploads:/app/uploads
 
 volumes:
   postgres_data:
+    driver: local
+  marketplace_uploads:
     driver: local
