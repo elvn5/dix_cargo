@@ -346,8 +346,10 @@ export function createAdminApp() {
 
   // ── Create user ────────────────────────────────────────────────────────────
 
-  app.get("/admin/users/new", requireAuth, (_req, res) => {
+  app.get("/admin/users/new", requireAuth, (req, res) => {
+    const phoneError = req.query.error === "phone";
     const body = `
+      ${phoneError ? `<div class="alert alert-danger">Неверный формат телефона. Введите ровно 9 цифр, например: <b>500123123</b></div>` : ""}
       <div class="row">
         <div class="col-lg-6">
           <div class="card stat-card p-4">
@@ -358,7 +360,13 @@ export function createAdminApp() {
               </div>
               <div class="mb-3">
                 <label class="form-label fw-semibold">Телефон</label>
-                <input name="phone" class="form-control" required placeholder="996700000000"/>
+                <input name="phone" id="phone" class="form-control" required
+                  placeholder="500123123"
+                  pattern="[0-9]{9}"
+                  title="Введите 9 цифр без пробелов и символов, например: 500123123"
+                  oninput="validatePhone(this)"/>
+                <div class="form-text text-muted">Формат: 9 цифр, например <code>500123123</code></div>
+                <div id="phone-error" class="invalid-feedback">Введите ровно 9 цифр (без +, пробелов и кода страны)</div>
               </div>
               <div class="mb-3">
                 <label class="form-label fw-semibold">
@@ -381,6 +389,21 @@ export function createAdminApp() {
                 <a href="/admin/users" class="btn btn-outline-secondary">Отмена</a>
               </div>
             </form>
+            <script>
+              function validatePhone(el) {
+                const valid = /^[0-9]{9}$/.test(el.value);
+                el.classList.toggle('is-invalid', !valid && el.value.length > 0);
+                el.classList.toggle('is-valid', valid);
+              }
+              document.querySelector('form').addEventListener('submit', function(e) {
+                const el = document.getElementById('phone');
+                if (!/^[0-9]{9}$/.test(el.value)) {
+                  e.preventDefault();
+                  el.classList.add('is-invalid');
+                  el.focus();
+                }
+              });
+            </script>
           </div>
         </div>
       </div>`;
@@ -391,6 +414,11 @@ export function createAdminApp() {
   app.post("/admin/users/new", requireAuth, async (req, res) => {
     const { full_name, phone, client_code, telegram_id } =
       req.body as Record<string, string>;
+
+    const cleanPhone = phone?.trim() ?? "";
+    if (!/^[0-9]{9}$/.test(cleanPhone)) {
+      return res.redirect("/admin/users/new?error=phone");
+    }
 
     let code = client_code?.trim();
     if (!code) {
@@ -404,7 +432,7 @@ export function createAdminApp() {
     const newUser = await prisma.user.create({
       data: {
         full_name: full_name.trim(),
-        phone: phone.trim(),
+        phone: cleanPhone,
         client_code: code,
         telegram_id: tgId,
       },
