@@ -6,6 +6,7 @@ import { Bot, Context } from "grammy";
 import prisma from "../database/prismaClient";
 import { userService } from "../services/userService";
 import { parseClientCode } from "../utils/parseClientCode";
+import { parseShippingDate } from "../utils/parseShippingDate";
 import fs from "fs";
 import path from "path";
 
@@ -743,17 +744,7 @@ export function createAdminApp(bot: Bot<Context>) {
   app.post("/admin/packages/import", requireAuth, upload.single("file"), async (req, res) => {
     if (!req.file) return res.redirect("/admin/packages/import");
 
-    // Extract shipping date from filename: "4月18号" → month=4, day=18
-    const filename = req.file.originalname;
-    const dateMatch = filename.match(/(\d+)月(\d+)号/);
-    let shippingDate: Date;
-    if (dateMatch) {
-      const month = parseInt(dateMatch[1], 10) - 1;
-      const day   = parseInt(dateMatch[2], 10);
-      shippingDate = new Date(new Date().getFullYear(), month, day);
-    } else {
-      shippingDate = new Date();
-    }
+    const shippingDate = parseShippingDate(req.file.originalname);
 
     // Parse Excel — column C (index 2) = client code, column D (index 3) = track code
     const wb = XLSX.read(req.file.buffer, { type: "buffer" });
