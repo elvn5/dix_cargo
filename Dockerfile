@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm ci
+RUN npm install
 
 RUN npx prisma generate
 
@@ -33,7 +33,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Устанавливаем ВСЕ зависимости (включая devDependencies для сборки)
-RUN npm ci
+RUN npm install
 
 # Генерируем Prisma Client
 RUN npx prisma generate
@@ -57,7 +57,7 @@ RUN npm install -g npm@11
 # Копируем манифесты и устанавливаем ТОЛЬКО prod-зависимости
 COPY package*.json ./
 COPY prisma ./prisma/
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Генерируем Prisma Client для prod-окружения
 RUN npx prisma generate
