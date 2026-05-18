@@ -918,23 +918,53 @@ export function createAdminApp(bot: Bot<Context>) {
           ${tab === "active" ? `<a href="/admin/packages/new" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Добавить</a>` : ""}
         </div>
       </div>
-      <form method="GET" action="/admin/packages" class="row g-2 mb-3">
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+      <style>
+        .flatpickr-calendar { font-family: inherit; box-shadow: 0 4px 24px rgba(0,0,0,.12); border-radius: 12px; overflow: hidden; border: none; }
+        .flatpickr-day.selected, .flatpickr-day.startRange, .flatpickr-day.endRange { background: #4e6ef2; border-color: #4e6ef2; }
+        .flatpickr-day.inRange { background: #e8edff; border-color: #e8edff; color: #4e6ef2; }
+        .flatpickr-day.selected.startRange + .endRange:not(:nth-child(7n+1)),
+        .flatpickr-day.startRange + .endRange:not(:nth-child(7n+1)) { box-shadow: -10px 0 0 #e8edff; }
+        .flatpickr-months .flatpickr-month { background: #4e6ef2; }
+        .flatpickr-current-month, .flatpickr-weekday { color: #fff; fill: #fff; }
+        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #fff; }
+        .date-range-input { cursor: pointer; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%236c757d' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5M1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4z'/%3E%3C/svg%3E") no-repeat right 10px center; padding-right: 36px; min-width: 210px; }
+        .date-range-input.active-filter { border-color: #4e6ef2; background-color: #f0f3ff; color: #4e6ef2; font-weight: 500; }
+      </style>
+      <form method="GET" action="/admin/packages" class="row g-2 mb-3" id="packagesFilter">
         <input type="hidden" name="tab" value="${tab}">
+        <input type="hidden" name="date_from" id="date_from" value="${dateFrom}">
+        <input type="hidden" name="date_to" id="date_to" value="${dateTo}">
         <div class="col-12 col-sm">
           <input name="search" value="${search}" class="form-control" placeholder="🔍 Поиск по трек-номеру…"/>
         </div>
         ${tab === "active" ? `<div class="col-6 col-sm-auto"><select name="status" class="form-select">${statusOptions}</select></div>` : ""}
-        <div class="col-6 col-sm-auto">
-          <input type="date" name="date_from" value="${dateFrom}" class="form-control" title="Дата от">
+        <div class="col-auto">
+          <input type="text" id="dateRangePicker" readonly
+            class="form-control date-range-input ${dateFrom || dateTo ? "active-filter" : ""}"
+            placeholder="📅 Выберите период"
+            value="${dateFrom && dateTo ? dateFrom + " — " + dateTo : dateFrom ? "с " + dateFrom : dateTo ? "по " + dateTo : ""}">
         </div>
-        <div class="col-6 col-sm-auto">
-          <input type="date" name="date_to" value="${dateTo}" class="form-control" title="Дата до">
-        </div>
-        <div class="col-6 col-sm-auto d-flex gap-2">
-          <button class="btn btn-outline-primary flex-fill">Найти</button>
-          <a href="/admin/packages" class="btn btn-outline-secondary flex-fill">Сброс</a>
+        <div class="col-auto d-flex gap-2">
+          <button class="btn btn-outline-primary">Найти</button>
+          <a href="/admin/packages?tab=${tab}" class="btn btn-outline-secondary">Сброс</a>
         </div>
       </form>
+      <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+      <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+      <script>
+        flatpickr("#dateRangePicker", {
+          mode: "range",
+          dateFormat: "Y-m-d",
+          locale: "ru",
+          disableMobile: true,
+          defaultDate: [${dateFrom ? `"${dateFrom}"` : ""} ${dateFrom && dateTo ? "," : ""} ${dateTo ? `"${dateTo}"` : ""}].filter(Boolean),
+          onChange: function(selectedDates) {
+            document.getElementById("date_from").value = selectedDates[0] ? flatpickr.formatDate(selectedDates[0], "Y-m-d") : "";
+            document.getElementById("date_to").value   = selectedDates[1] ? flatpickr.formatDate(selectedDates[1], "Y-m-d") : "";
+          }
+        });
+      </script>
       <div class="card stat-card">
         <div class="table-responsive">
           <table class="table table-hover mb-0 align-middle">
