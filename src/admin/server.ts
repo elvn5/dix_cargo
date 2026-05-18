@@ -511,10 +511,11 @@ export function createAdminApp(bot: Bot<Context>) {
     const dupCode   = req.query.error === "duplicate_code";
     const pkgSaved  = req.query.pkg_saved === "1";
 
-    const packages = await prisma.package.findMany({
-      where: { user_id: user.id },
-      orderBy: { created_at: "desc" },
-    });
+    const [packages, tariffSetting] = await Promise.all([
+      prisma.package.findMany({ where: { user_id: user.id }, orderBy: { created_at: "desc" } }),
+      prisma.setting.findUnique({ where: { key: "tariff_per_kg" } }),
+    ]);
+    const tariff = parseFloat(tariffSetting?.value ?? "0") || 0;
 
     const STATUS_LABEL: Record<string, string> = {
       IN_OFFICE:  "В офисе",
@@ -569,9 +570,21 @@ export function createAdminApp(bot: Bot<Context>) {
               </div>
               <div class="card-footer bg-white d-flex align-items-center gap-2 flex-wrap">
                 <span class="text-muted small" id="sel-count">Выбрано: 0</span>
-                <select name="status" class="form-select form-select-sm" style="width:auto">
+                <select name="status" id="bulk-status" class="form-select form-select-sm" style="width:auto">
                   ${statusOptions("")}
                 </select>
+                <div id="weight-block" class="d-none d-flex align-items-center gap-2">
+                  <div class="input-group input-group-sm" style="width:200px">
+                    <span class="input-group-text">Вес</span>
+                    <input type="number" name="weight" id="bulk-weight" class="form-control" min="0" step="0.01" placeholder="кг"/>
+                    <span class="input-group-text">кг</span>
+                  </div>
+                  <div class="input-group input-group-sm" style="width:200px">
+                    <span class="input-group-text">Цена</span>
+                    <input type="number" name="price" id="bulk-price" class="form-control" min="0" step="0.01" placeholder="сом"/>
+                    <span class="input-group-text">сом</span>
+                  </div>
+                </div>
                 <button class="btn btn-sm btn-primary fw-semibold" id="apply-btn" disabled>
                   <i class="bi bi-check2-all"></i> Применить к выбранным
                 </button>
@@ -579,10 +592,15 @@ export function createAdminApp(bot: Bot<Context>) {
             </form>`}
       </div>
       <script>
-        const cbAll = document.getElementById('cb-all');
-        const cbs = () => [...document.querySelectorAll('.pkg-cb')];
+        const cbAll    = document.getElementById('cb-all');
+        const cbs      = () => [...document.querySelectorAll('.pkg-cb')];
         const applyBtn = document.getElementById('apply-btn');
         const selCount = document.getElementById('sel-count');
+        const bulkStatus      = document.getElementById('bulk-status');
+        const weightBlock     = document.getElementById('weight-block');
+        const bulkWeightInput = document.getElementById('bulk-weight');
+        const bulkPriceInput  = document.getElementById('bulk-price');
+        const TARIFF          = ${tariff};
 
         function updateState() {
           const checked = cbs().filter(c => c.checked).length;
@@ -591,6 +609,17 @@ export function createAdminApp(bot: Bot<Context>) {
           cbAll.indeterminate = checked > 0 && checked < cbs().length;
           cbAll.checked = checked === cbs().length && cbs().length > 0;
         }
+
+        bulkStatus.addEventListener('change', function() {
+          const show = this.value === 'IN_OFFICE';
+          weightBlock.classList.toggle('d-none', !show);
+          if (!show) { bulkWeightInput.value = ''; bulkPriceInput.value = ''; }
+        });
+
+        bulkWeightInput.addEventListener('input', function() {
+          if (TARIFF > 0 && this.value !== '')
+            bulkPriceInput.value = (parseFloat(this.value) * TARIFF).toFixed(2);
+        });
 
         cbAll.addEventListener('change', () => {
           cbs().forEach(c => c.checked = cbAll.checked);
@@ -659,21 +688,25 @@ export function createAdminApp(bot: Bot<Context>) {
 
   app.post("/admin/users/:id/packages/status", requireAuth, async (req, res) => {
     const userId = Number(req.params.id);
-    const { ids, status } = req.body as { ids: string | string[]; status: string };
+    const { ids, status, weight, price } = req.body as Record<string, string | string[]>;
     const validStatuses = ["IN_TRANSIT", "IN_OFFICE", "DELIVERED"];
-    if (!validStatuses.includes(status)) return res.redirect(`/admin/users/${userId}`);
+    if (!validStatuses.includes(status as string)) return res.redirect(`/admin/users/${userId}`);
 
     const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
     if (idList.length > 0) {
+      const data: Record<string, unknown> = { status };
+      if (weight) data.weight = parseFloat(weight as string);
+      if (price)  data.price  = parseFloat(price  as string);
+
       await prisma.package.updateMany({
         where: { id: { in: idList }, user_id: userId },
-        data:  { status: status as "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED" },
+        data:  data as { status: "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED"; weight?: number; price?: number },
       });
 
       if (status === "IN_OFFICE" || status === "DELIVERED") {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         const packages = await prisma.package.findMany({ where: { id: { in: idList } } });
-        await notifyStatusChange(bot, userId, user?.client_code ?? "—", packages.map(p => p.track_code), status);
+        await notifyStatusChange(bot, userId, user?.client_code ?? "—", packages.map(p => p.track_code), status as "IN_OFFICE" | "DELIVERED");
       }
     }
     res.redirect(`/admin/users/${userId}?pkg_saved=1`);
