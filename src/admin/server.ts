@@ -167,24 +167,29 @@ async function notifyStatusChange(
   userId: number,
   clientCode: string,
   trackCodes: string[],
-  status: "IN_OFFICE" | "DELIVERED"
+  status: "IN_OFFICE" | "DELIVERED",
+  weight?: number | null,
+  price?: number | null,
 ) {
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.telegram_id <= 0n) return;
 
-    const isSingle = trackCodes.length === 1;
+    const isSingle  = trackCodes.length === 1;
     const trackList = trackCodes.map(t => `• <code>${t}</code>`).join("\n");
+    const weightLine = weight != null ? `\n⚖️ Вес: <b>${weight} кг</b>` : "";
+    const priceLine  = price  != null ? `\n💰 К оплате: <b>${price.toLocaleString("ru-RU")} сом</b>` : "";
+    const extra      = weightLine + priceLine;
 
     let text: string;
     if (status === "IN_OFFICE") {
       text = isSingle
-        ? `📦 Ваша посылка прибыла в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>\n\nВы можете забрать её в рабочее время.`
-        : `📦 ${trackCodes.length} посылок прибыли в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}\n\nВы можете забрать их в рабочее время.`;
+        ? `📦 Ваша посылка прибыла в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>${extra}\n\nВы можете забрать её в рабочее время.`
+        : `📦 ${trackCodes.length} посылок прибыли в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}${extra}\n\nВы можете забрать их в рабочее время.`;
     } else {
       text = isSingle
-        ? `✅ Ваша посылка выдана!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>\n\nСпасибо, что выбрали DIX Cargo!`
-        : `✅ ${trackCodes.length} посылок выдано!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}\n\nСпасибо, что выбрали DIX Cargo!`;
+        ? `✅ Ваша посылка выдана!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>${extra}\n\nСпасибо, что выбрали DIX Cargo!`
+        : `✅ ${trackCodes.length} посылок выдано!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}${extra}\n\nСпасибо, что выбрали DIX Cargo!`;
     }
 
     await bot.api.sendMessage(Number(user.telegram_id), text, { parse_mode: "HTML" });
@@ -706,7 +711,9 @@ export function createAdminApp(bot: Bot<Context>) {
       if (status === "IN_OFFICE" || status === "DELIVERED") {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         const packages = await prisma.package.findMany({ where: { id: { in: idList } } });
-        await notifyStatusChange(bot, userId, user?.client_code ?? "—", packages.map(p => p.track_code), status as "IN_OFFICE" | "DELIVERED");
+        const w = weight ? parseFloat(weight as string) : null;
+        const p = price  ? parseFloat(price  as string) : null;
+        await notifyStatusChange(bot, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
       }
     }
     res.redirect(`/admin/users/${userId}?pkg_saved=1`);
@@ -1210,7 +1217,7 @@ export function createAdminApp(bot: Bot<Context>) {
     });
 
     if (status === "IN_OFFICE" || status === "DELIVERED") {
-      await notifyStatusChange(bot, pkg.user_id, pkg.user.client_code, [pkg.track_code], status);
+      await notifyStatusChange(bot, pkg.user_id, pkg.user.client_code, [pkg.track_code], status, pkg.weight, pkg.price);
     }
 
     res.redirect(`/admin/packages/${req.params.id}?saved=1`);
