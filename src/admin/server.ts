@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { Bot, Context } from "grammy";
 import prisma from "../database/prismaClient";
 import { userService } from "../services/userService";
+import { parseClientCode } from "../utils/parseClientCode";
 import fs from "fs";
 import path from "path";
 
@@ -702,9 +703,9 @@ export function createAdminApp(bot: Bot<Context>) {
         <div class="col-lg-6">
           <div class="card stat-card p-4">
             <p class="text-muted small mb-3">
-              Колонка <b>C</b> — код клиента (DIX**** или DIX-****).<br>
+              Колонка <b>C</b> — код клиента. Форматы: <code>2222</code>, <code>DIX2222</code>, <code>DIX-2222</code>, <code>DIX 2222</code>.<br>
               Колонка <b>D</b> — трек-номер.<br>
-              Строки без DIX-кода в колонке C пропускаются.<br>
+              Строки без распознанного кода в колонке C пропускаются.<br>
               Дата отправки извлекается из имени файла (формат: <code>4月18号…</code>).<br>
               Если дата не найдена — используется сегодняшняя.
             </p>
@@ -747,20 +748,17 @@ export function createAdminApp(bot: Bot<Context>) {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
 
-    const DIX_RE = /^DIX-?(\d+)$/i;
-
     let imported = 0, skipped = 0;
     const errors: string[] = [];
 
     for (const row of rows) {
-      const rawCode  = String((row as unknown[])[2] ?? "").trim();
+      const rawCode   = (row as unknown[])[2];
       const trackCode = String((row as unknown[])[3] ?? "").trim();
 
-      // Skip rows without a DIX code in column C or empty track in column D
-      if (!DIX_RE.test(rawCode) || !trackCode) continue;
+      const clientCode = parseClientCode(rawCode);
 
-      // Normalise: DIX0022 → DIX-0022, DIX-22 → DIX-0022
-      const clientCode = rawCode.replace(DIX_RE, (_, n) => `DIX-${n.padStart(4, "0")}`);
+      // Skip rows without a recognisable DIX code in column C or empty track in column D
+      if (!clientCode || !trackCode) continue;
 
       const user = await prisma.user.findUnique({ where: { client_code: clientCode } });
       if (!user) { errors.push(`${clientCode}: пользователь не найден`); skipped++; continue; }
