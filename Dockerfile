@@ -26,6 +26,8 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+RUN npm install -g npm@11
+
 # Копируем только манифесты для кэширования слоя зависимостей
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -49,6 +51,8 @@ FROM node:22-alpine AS production
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+RUN npm install -g npm@11
 
 # Копируем манифесты и устанавливаем ТОЛЬКО prod-зависимости
 COPY package*.json ./
