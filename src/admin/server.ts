@@ -161,18 +161,19 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
-async function notifyInOffice(bot: Bot<Context>, userId: number, clientCode: string, trackCode: string) {
+async function notifyInOffice(bot: Bot<Context>, userId: number, clientCode: string, trackCodes: string[]) {
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.telegram_id <= 0n) return;
-    await bot.api.sendMessage(
-      Number(user.telegram_id),
-      `📦 Ваша посылка прибыла в офис!\n\n` +
-      `🪪 Код клиента: <b>${clientCode}</b>\n` +
-      `📬 Трек-номер: <b>${trackCode}</b>\n\n` +
-      `Вы можете забрать её в рабочее время.`,
-      { parse_mode: "HTML" }
-    );
+
+    const isSingle = trackCodes.length === 1;
+    const trackList = trackCodes.map(t => `• <code>${t}</code>`).join("\n");
+
+    const text = isSingle
+      ? `📦 Ваша посылка прибыла в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>\n\nВы можете забрать её в рабочее время.`
+      : `📦 ${trackCodes.length} посылки прибыли в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}\n\nВы можете забрать их в рабочее время.`;
+
+    await bot.api.sendMessage(Number(user.telegram_id), text, { parse_mode: "HTML" });
   } catch (err) {
     console.error("[Admin] Не удалось отправить уведомление пользователю:", err);
   }
@@ -658,9 +659,7 @@ export function createAdminApp(bot: Bot<Context>) {
       if (status === "IN_OFFICE") {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         const packages = await prisma.package.findMany({ where: { id: { in: idList } } });
-        for (const pkg of packages) {
-          await notifyInOffice(bot, userId, user?.client_code ?? "—", pkg.track_code);
-        }
+        await notifyInOffice(bot, userId, user?.client_code ?? "—", packages.map(p => p.track_code));
       }
     }
     res.redirect(`/admin/users/${userId}?pkg_saved=1`);
@@ -1084,7 +1083,7 @@ export function createAdminApp(bot: Bot<Context>) {
     });
 
     if (status === "IN_OFFICE") {
-      await notifyInOffice(bot, pkg.user_id, pkg.user.client_code, pkg.track_code);
+      await notifyInOffice(bot, pkg.user_id, pkg.user.client_code, [pkg.track_code]);
     }
 
     res.redirect(`/admin/packages/${req.params.id}?saved=1`);
