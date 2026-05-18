@@ -161,7 +161,13 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
-async function notifyInOffice(bot: Bot<Context>, userId: number, clientCode: string, trackCodes: string[]) {
+async function notifyStatusChange(
+  bot: Bot<Context>,
+  userId: number,
+  clientCode: string,
+  trackCodes: string[],
+  status: "IN_OFFICE" | "DELIVERED"
+) {
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.telegram_id <= 0n) return;
@@ -169,9 +175,16 @@ async function notifyInOffice(bot: Bot<Context>, userId: number, clientCode: str
     const isSingle = trackCodes.length === 1;
     const trackList = trackCodes.map(t => `• <code>${t}</code>`).join("\n");
 
-    const text = isSingle
-      ? `📦 Ваша посылка прибыла в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>\n\nВы можете забрать её в рабочее время.`
-      : `📦 ${trackCodes.length} посылки прибыли в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}\n\nВы можете забрать их в рабочее время.`;
+    let text: string;
+    if (status === "IN_OFFICE") {
+      text = isSingle
+        ? `📦 Ваша посылка прибыла в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>\n\nВы можете забрать её в рабочее время.`
+        : `📦 ${trackCodes.length} посылок прибыли в офис!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}\n\nВы можете забрать их в рабочее время.`;
+    } else {
+      text = isSingle
+        ? `✅ Ваша посылка выдана!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>\n\nСпасибо, что выбрали DIX Cargo!`
+        : `✅ ${trackCodes.length} посылок выдано!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}\n\nСпасибо, что выбрали DIX Cargo!`;
+    }
 
     await bot.api.sendMessage(Number(user.telegram_id), text, { parse_mode: "HTML" });
   } catch (err) {
@@ -656,10 +669,10 @@ export function createAdminApp(bot: Bot<Context>) {
         data:  { status: status as "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED" },
       });
 
-      if (status === "IN_OFFICE") {
+      if (status === "IN_OFFICE" || status === "DELIVERED") {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         const packages = await prisma.package.findMany({ where: { id: { in: idList } } });
-        await notifyInOffice(bot, userId, user?.client_code ?? "—", packages.map(p => p.track_code));
+        await notifyStatusChange(bot, userId, user?.client_code ?? "—", packages.map(p => p.track_code), status);
       }
     }
     res.redirect(`/admin/users/${userId}?pkg_saved=1`);
@@ -1082,8 +1095,8 @@ export function createAdminApp(bot: Bot<Context>) {
       include: { user: true },
     });
 
-    if (status === "IN_OFFICE") {
-      await notifyInOffice(bot, pkg.user_id, pkg.user.client_code, [pkg.track_code]);
+    if (status === "IN_OFFICE" || status === "DELIVERED") {
+      await notifyStatusChange(bot, pkg.user_id, pkg.user.client_code, [pkg.track_code], status);
     }
 
     res.redirect(`/admin/packages/${req.params.id}?saved=1`);
