@@ -983,6 +983,8 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── Package new ────────────────────────────────────────────────────────────
 
   app.get("/admin/packages/new", requireAuth, async (_req, res) => {
+    const tariffSetting = await prisma.setting.findUnique({ where: { key: "tariff_per_kg" } });
+    const tariff = parseFloat(tariffSetting?.value ?? "0") || 0;
     const users = await prisma.user.findMany({
       orderBy: { client_code: "asc" },
       select: { id: true, client_code: true, full_name: true },
@@ -1005,13 +1007,24 @@ export function createAdminApp(bot: Bot<Context>) {
                 <label class="form-label fw-semibold">Трек-код</label>
                 <input name="track_code" class="form-control font-monospace" required placeholder="RU123456789CN"/>
               </div>
-              <div class="mb-4">
+              <div class="mb-3">
                 <label class="form-label fw-semibold">Статус</label>
                 <select name="status" class="form-select">
                   <option value="IN_TRANSIT">🚚 В пути</option>
                   <option value="IN_OFFICE">🏢 В офисе</option>
                   <option value="DELIVERED">✅ Выдан</option>
                 </select>
+              </div>
+              <div class="row g-3 mb-4">
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Вес (кг)</label>
+                  <input type="number" name="weight" id="newWeight" class="form-control" min="0" step="0.01" placeholder="0.00"/>
+                </div>
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Цена (сом)</label>
+                  <input type="number" name="price" id="newPrice" class="form-control" min="0" step="0.01" placeholder="0.00"/>
+                  <div class="form-text">Тариф: <b>${tariff} сом/кг</b></div>
+                </div>
               </div>
               <div class="d-flex gap-2">
                 <button class="btn btn-primary fw-semibold">
@@ -1020,6 +1033,16 @@ export function createAdminApp(bot: Bot<Context>) {
                 <a href="/admin/packages" class="btn btn-outline-secondary">Отмена</a>
               </div>
             </form>
+            <script>
+              (function() {
+                const tariff = ${tariff};
+                const w = document.getElementById('newWeight');
+                const p = document.getElementById('newPrice');
+                w.addEventListener('input', function() {
+                  if (tariff > 0 && w.value !== '') p.value = (parseFloat(w.value) * tariff).toFixed(2);
+                });
+              })();
+            </script>
           </div>
         </div>
       </div>`;
@@ -1028,13 +1051,15 @@ export function createAdminApp(bot: Bot<Context>) {
   });
 
   app.post("/admin/packages/new", requireAuth, async (req, res) => {
-    const { user_id, track_code, status } = req.body as Record<string, string>;
+    const { user_id, track_code, status, weight, price } = req.body as Record<string, string>;
 
     await prisma.package.create({
       data: {
-        user_id: Number(user_id),
+        user_id:    Number(user_id),
         track_code: track_code.trim(),
-        status: status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+        status:     status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+        weight:     weight ? parseFloat(weight) : null,
+        price:      price  ? parseFloat(price)  : null,
       },
     });
 
@@ -1044,13 +1069,17 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── Package detail / edit ──────────────────────────────────────────────────
 
   app.get("/admin/packages/:id", requireAuth, async (req, res) => {
-    const pkg = await prisma.package.findUnique({
-      where: { id: Number(req.params.id) },
-      include: { user: { select: { client_code: true, full_name: true } } },
-    });
+    const [pkg, tariffSetting] = await Promise.all([
+      prisma.package.findUnique({
+        where: { id: Number(req.params.id) },
+        include: { user: { select: { client_code: true, full_name: true } } },
+      }),
+      prisma.setting.findUnique({ where: { key: "tariff_per_kg" } }),
+    ]);
     if (!pkg) return res.redirect("/admin/packages");
 
-    const saved = req.query.saved === "1";
+    const saved  = req.query.saved === "1";
+    const tariff = parseFloat(tariffSetting?.value ?? "0") || 0;
 
     const body = `
       ${saved ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
@@ -1062,13 +1091,26 @@ export function createAdminApp(bot: Bot<Context>) {
                 <label class="form-label fw-semibold">Трек-код</label>
                 <input name="track_code" value="${pkg.track_code}" class="form-control font-monospace" required/>
               </div>
-              <div class="mb-4">
+              <div class="mb-3">
                 <label class="form-label fw-semibold">Статус</label>
                 <select name="status" class="form-select">
                   <option value="IN_TRANSIT" ${pkg.status === "IN_TRANSIT" ? "selected" : ""}>🚚 В пути</option>
                   <option value="IN_OFFICE"  ${pkg.status === "IN_OFFICE"  ? "selected" : ""}>🏢 В офисе</option>
                   <option value="DELIVERED"  ${pkg.status === "DELIVERED"  ? "selected" : ""}>✅ Выдан</option>
                 </select>
+              </div>
+              <div class="row g-3 mb-4">
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Вес (кг)</label>
+                  <input type="number" name="weight" id="editWeight" class="form-control" min="0" step="0.01"
+                    value="${pkg.weight ?? ""}" placeholder="0.00"/>
+                </div>
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Цена (сом)</label>
+                  <input type="number" name="price" id="editPrice" class="form-control" min="0" step="0.01"
+                    value="${pkg.price ?? ""}" placeholder="0.00"/>
+                  <div class="form-text">Тариф: <b>${tariff} сом/кг</b></div>
+                </div>
               </div>
               <div class="d-flex gap-2">
                 <button class="btn btn-primary fw-semibold">
@@ -1077,6 +1119,16 @@ export function createAdminApp(bot: Bot<Context>) {
                 <a href="/admin/packages" class="btn btn-outline-secondary">Назад</a>
               </div>
             </form>
+            <script>
+              (function() {
+                const tariff = ${tariff};
+                const w = document.getElementById('editWeight');
+                const p = document.getElementById('editPrice');
+                w.addEventListener('input', function() {
+                  if (tariff > 0 && w.value !== '') p.value = (parseFloat(w.value) * tariff).toFixed(2);
+                });
+              })();
+            </script>
           </div>
         </div>
         <div class="col-lg-4">
@@ -1085,6 +1137,10 @@ export function createAdminApp(bot: Bot<Context>) {
             <dl class="mb-0 small">
               <dt class="text-muted">Клиент</dt>
               <dd><span class="badge-code">${pkg.user.client_code}</span> ${pkg.user.full_name}</dd>
+              <dt class="text-muted">Вес</dt>
+              <dd>${pkg.weight != null ? pkg.weight + " кг" : "—"}</dd>
+              <dt class="text-muted">Цена</dt>
+              <dd>${pkg.price != null ? pkg.price.toLocaleString("ru-RU") + " сом" : "—"}</dd>
               <dt class="text-muted">Дата добавления</dt>
               <dd>${pkg.created_at.toLocaleString("ru-RU")}</dd>
               <dt class="text-muted">Последнее изменение</dt>
@@ -1107,13 +1163,15 @@ export function createAdminApp(bot: Bot<Context>) {
   });
 
   app.post("/admin/packages/:id", requireAuth, async (req, res) => {
-    const { track_code, status } = req.body as Record<string, string>;
+    const { track_code, status, weight, price } = req.body as Record<string, string>;
 
     const pkg = await prisma.package.update({
       where: { id: Number(req.params.id) },
       data: {
         track_code: track_code.trim(),
-        status: status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+        status:     status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+        weight:     weight ? parseFloat(weight) : null,
+        price:      price  ? parseFloat(price)  : null,
       },
       include: { user: true },
     });
@@ -1135,7 +1193,7 @@ export function createAdminApp(bot: Bot<Context>) {
   app.get("/admin/settings", requireAuth, async (req, res) => {
     const saved = req.query.saved === "1";
     const settings = await prisma.setting.findMany({
-      where: { key: { in: ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"] } },
+      where: { key: { in: ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url", "tariff_per_kg"] } },
     });
     const s: Record<string, string> = {};
     for (const row of settings) s[row.key] = row.value;
@@ -1146,6 +1204,16 @@ export function createAdminApp(bot: Bot<Context>) {
         <div class="col-lg-8">
           <div class="card stat-card p-4 mb-4">
             <form method="POST" action="/admin/settings">
+              <h5 class="fw-bold mb-3">💰 Тариф</h5>
+              <div class="row g-3 mb-4">
+                <div class="col-sm-4">
+                  <label class="form-label fw-semibold">Стоимость за кг (сом)</label>
+                  <input type="number" name="tariff_per_kg" class="form-control" min="0" step="0.01"
+                    value="${s.tariff_per_kg ?? ""}" placeholder="0.00"/>
+                  <div class="form-text">Цена посылки = вес × тариф</div>
+                </div>
+              </div>
+              <hr class="my-4">
               <h5 class="fw-bold mb-3">👥 Кнопки менеджеров</h5>
               <div class="row g-3 mb-4">
                 <div class="col-sm-3">
@@ -1184,7 +1252,7 @@ export function createAdminApp(bot: Bot<Context>) {
 
   app.post("/admin/settings", requireAuth, async (req, res) => {
     const body = req.body as Record<string, string>;
-    const keys = ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"];
+    const keys = ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url", "tariff_per_kg"];
     for (const key of keys) {
       if (typeof body[key] === "string") {
         await prisma.setting.upsert({

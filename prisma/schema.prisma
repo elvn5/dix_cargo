@@ -22,6 +22,8 @@ model Package {
   status     PackageStatus @default(IN_TRANSIT)
   user_id    Int
   user       User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  weight     Float?
+  price      Float?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
