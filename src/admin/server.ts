@@ -744,7 +744,9 @@ export function createAdminApp(bot: Bot<Context>) {
   app.post("/admin/packages/import", requireAuth, upload.single("file"), async (req, res) => {
     if (!req.file) return res.redirect("/admin/packages/import");
 
-    const shippingDate = parseShippingDate(req.file.originalname);
+    // multer decodes the filename as latin1; re-encode to get the original UTF-8
+    const filename = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+    const shippingDate = parseShippingDate(filename);
 
     // Parse Excel — column C (index 2) = client code, column D (index 3) = track code
     const wb = XLSX.read(req.file.buffer, { type: "buffer" });
