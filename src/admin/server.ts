@@ -75,6 +75,7 @@ function layout(title: string, body: string, active = ""): string {
       ${nav("/admin", "Дашборд", '<i class="bi bi-speedometer2"></i>')}
       ${nav("/admin/users", "Пользователи", '<i class="bi bi-people"></i>')}
       ${nav("/admin/packages", "Посылки", '<i class="bi bi-box-seam"></i>')}
+      ${nav("/admin/promocodes", "Промокоды", '<i class="bi bi-ticket-perforated"></i>')}
       ${nav("/admin/marketplaces", "Маркетплейсы", '<i class="bi bi-shop"></i>')}
       ${nav("/admin/settings", "Настройки бота", '<i class="bi bi-gear"></i>')}
     </div>
@@ -1226,6 +1227,79 @@ export function createAdminApp(bot: Bot<Context>) {
   app.post("/admin/packages/:id/delete", requireAuth, async (req, res) => {
     await prisma.package.delete({ where: { id: Number(req.params.id) } });
     res.redirect("/admin/packages");
+  });
+
+  // ── Promo codes ────────────────────────────────────────────────────────────
+
+  app.get("/admin/promocodes", requireAuth, async (_req, res) => {
+    const promos = await prisma.promoCode.findMany({
+      orderBy: { created_at: "desc" },
+      include: { claimer: { select: { client_code: true, full_name: true, id: true } } },
+    });
+
+    const rows = promos.map(p => `
+      <tr>
+        <td><code>${p.code}</code></td>
+        <td>${p.description ?? "—"}</td>
+        <td>${p.claimed_by
+          ? `<a href="/admin/users/${p.claimer!.id}">${p.claimer!.client_code}</a> ${p.claimer!.full_name}`
+          : `<span class="badge bg-success">Активен</span>`}</td>
+        <td>${p.claimed_at ? p.claimed_at.toLocaleString("ru-RU") : "—"}</td>
+        <td>
+          <form method="POST" action="/admin/promocodes/${p.id}/delete" onsubmit="return confirm('Удалить промокод?')">
+            <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
+          </form>
+        </td>
+      </tr>`).join("");
+
+    const body = `
+      <div class="row g-4">
+        <div class="col-lg-4">
+          <div class="card stat-card p-4">
+            <h5 class="fw-bold mb-3">➕ Новый промокод</h5>
+            <form method="POST" action="/admin/promocodes/new">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Код</label>
+                <input name="code" class="form-control font-monospace" required placeholder="SUMMER25"/>
+              </div>
+              <div class="mb-4">
+                <label class="form-label fw-semibold">Описание <span class="text-muted fw-normal">(необязательно)</span></label>
+                <input name="description" class="form-control" placeholder="Скидка 10% на следующий заказ"/>
+              </div>
+              <button class="btn btn-primary fw-semibold w-100">
+                <i class="bi bi-plus-lg"></i> Создать
+              </button>
+            </form>
+          </div>
+        </div>
+        <div class="col-lg-8">
+          <div class="card stat-card">
+            <div class="table-responsive">
+              <table class="table table-hover mb-0 align-middle">
+                <thead><tr>
+                  <th>Код</th><th>Описание</th><th>Статус / Клиент</th><th>Получен</th><th></th>
+                </tr></thead>
+                <tbody>${rows || "<tr><td colspan='5' class='text-center text-muted py-4'>Промокодов нет</td></tr>"}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    res.send(layout("Промокоды", body, "/admin/promocodes"));
+  });
+
+  app.post("/admin/promocodes/new", requireAuth, async (req, res) => {
+    const { code, description } = req.body as Record<string, string>;
+    await prisma.promoCode.create({
+      data: { code: code.trim(), description: description?.trim() || null },
+    });
+    res.redirect("/admin/promocodes");
+  });
+
+  app.post("/admin/promocodes/:id/delete", requireAuth, async (req, res) => {
+    await prisma.promoCode.delete({ where: { id: Number(req.params.id) } });
+    res.redirect("/admin/promocodes");
   });
 
   // ── Settings ───────────────────────────────────────────────────────────────

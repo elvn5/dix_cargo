@@ -54,15 +54,16 @@ type RegStep =
 
 const regState = new Map<number, RegStep>();
 
-const MENU_KEYBOARD = {
-  keyboard: [
+async function getMenuKeyboard() {
+  const hasPromo = await prisma.promoCode.findFirst({ where: { claimed_by: null } });
+  const rows: { text: string }[][] = [
     [{ text: "📦 Мои посылки" }, { text: "🚫 Запрещенные товары" }],
     [{ text: "📍 Адреса" }, { text: "👤 Профиль" }],
     [{ text: "💬 Поддержка" }, { text: "📋 Шаблон заполнения" }],
-  ],
-  resize_keyboard: true,
-  persistent: true,
-};
+  ];
+  if (hasPromo) rows.push([{ text: "🎁 Получить промокод" }]);
+  return { keyboard: rows, resize_keyboard: true, persistent: true };
+}
 
 async function getManagersKeyboard() {
   const settings = await prisma.setting.findMany({
@@ -108,7 +109,7 @@ export function registerControllers(bot: Bot<Context>): void {
         ),
         {
           parse_mode: "HTML",
-          reply_markup: MENU_KEYBOARD,
+          reply_markup: await getMenuKeyboard(),
         }
       );
       return;
@@ -384,6 +385,45 @@ export function registerControllers(bot: Bot<Context>): void {
       return;
     }
 
+    if (text === "🎁 Получить промокод") {
+      const user = await userService.findUserByTelegramId(BigInt(senderId));
+      if (!user) {
+        await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
+        return;
+      }
+
+      // Атомарно: берём первый свободный код и сразу привязываем к пользователю
+      const promo = await prisma.promoCode.findFirst({ where: { claimed_by: null } });
+      if (!promo) {
+        await ctx.reply(
+          "😔 К сожалению, все промокоды уже разобраны.",
+          { reply_markup: await getMenuKeyboard() }
+        );
+        return;
+      }
+
+      const claimed = await prisma.promoCode.updateMany({
+        where: { id: promo.id, claimed_by: null },
+        data:  { claimed_by: user.id, claimed_at: new Date() },
+      });
+
+      if (claimed.count === 0) {
+        // Кто-то успел раньше (race condition)
+        await ctx.reply(
+          "😔 К сожалению, промокод уже был получен другим клиентом.",
+          { reply_markup: await getMenuKeyboard() }
+        );
+        return;
+      }
+
+      const desc = promo.description ? `\n\n${promo.description}` : "";
+      await ctx.reply(
+        `🎉 Ваш промокод: <code>${promo.code}</code>${desc}`,
+        { parse_mode: "HTML", reply_markup: await getMenuKeyboard() }
+      );
+      return;
+    }
+
     // Шаги регистрации
     const state = regState.get(senderId);
     if (!state) {
@@ -464,7 +504,7 @@ export function registerControllers(bot: Bot<Context>): void {
               existingUser.full_name,
               existingUser.phone
             ),
-            { parse_mode: "HTML", reply_markup: MENU_KEYBOARD }
+            { parse_mode: "HTML", reply_markup: await getMenuKeyboard() }
           );
           return;
         }
@@ -481,7 +521,7 @@ export function registerControllers(bot: Bot<Context>): void {
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
           { parse_mode: "HTML", reply_markup: await getManagersKeyboard() }
         );
-        await ctx.reply("Выберите раздел:", { reply_markup: MENU_KEYBOARD });
+        await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard() });
       } catch (error) {
         console.error("[Registration] Ошибка при создании пользователя:", error);
         await ctx.reply("⚠️ Произошла ошибка при регистрации. Попробуйте позже.");
