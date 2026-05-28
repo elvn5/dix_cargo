@@ -119,20 +119,12 @@ export function registerControllers(bot: Bot<Context>): void {
 
     await ctx.reply(
       "👋 Добро пожаловать!\n\n" +
-        "Для регистрации укажите номер телефона одним из способов:\n\n" +
-        "• Нажмите кнопку «📱 Поделиться контактом»\n" +
-        "• Или введите номер вручную в формате <b>XXX123456</b>\n" +
-        "  где XXX — код оператора\n" +
-        "  Пример: <code>500100500</code>",
+        "Для регистрации введите номер телефона в формате <b>XXX123456</b>\n" +
+        "где XXX — код оператора\n" +
+        "Пример: <code>500100500</code>",
       {
         parse_mode: "HTML",
-        reply_markup: {
-          keyboard: [
-            [{ text: "📱 Поделиться контактом", request_contact: true }],
-          ],
-          resize_keyboard: true,
-          one_time_keyboard: true,
-        },
+        reply_markup: { remove_keyboard: true },
       }
     );
   });
