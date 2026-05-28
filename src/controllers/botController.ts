@@ -1,6 +1,7 @@
 import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
 import prisma from "../database/prismaClient";
+import { parseClientCode } from "../utils/parseClientCode";
 import path from "path";
 import fs from "fs";
 
@@ -120,9 +121,9 @@ export function registerControllers(bot: Bot<Context>): void {
 
     await ctx.reply(
       "👋 Добро пожаловать!\n\n" +
-        "Для регистрации введите номер телефона в формате <b>XXX123456</b>\n" +
-        "где XXX — код оператора\n" +
-        "Пример: <code>500100500</code>",
+        "Введите номер телефона <b>или</b> ваш клиентский код:\n\n" +
+        "• Телефон: <code>500100500</code> (9 цифр)\n" +
+        "• Код клиента: <code>DIX-0001</code>",
       {
         parse_mode: "HTML",
         reply_markup: { remove_keyboard: true },
@@ -470,24 +471,80 @@ export function registerControllers(bot: Bot<Context>): void {
     }
 
     if (state.step === "phone") {
+      // ── Попытка найти по клиентскому коду ──────────────────────────────────
+      const parsedCode = parseClientCode(text);
+      if (parsedCode) {
+        const codeUser = await prisma.user.findUnique({ where: { client_code: parsedCode } });
+        if (!codeUser) {
+          await ctx.reply(
+            `❌ Клиент с кодом <code>${parsedCode}</code> не найден.\n\nПроверьте код или введите номер телефона.`,
+            { parse_mode: "HTML" }
+          );
+          return;
+        }
+        if (codeUser.telegram_id > 0n) {
+          // Уже привязан к реальному Telegram-аккаунту
+          if (codeUser.telegram_id === BigInt(senderId)) {
+            regState.delete(senderId);
+            await ctx.reply(buildProfile(codeUser.client_code, codeUser.full_name, codeUser.phone),
+              { parse_mode: "HTML", reply_markup: await getMenuKeyboard() });
+          } else {
+            await ctx.reply("❌ Этот код уже привязан к другому аккаунту.\n\nОбратитесь к менеджеру.");
+          }
+          return;
+        }
+        // Создан администратором — привязываем Telegram
+        regState.delete(senderId);
+        const linked = await prisma.user.update({
+          where: { id: codeUser.id },
+          data: { telegram_id: BigInt(senderId) },
+        });
+        await ctx.reply(buildProfile(linked.client_code, linked.full_name, linked.phone),
+          { parse_mode: "HTML", reply_markup: await getManagersKeyboard() });
+        await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard() });
+        return;
+      }
+
+      // ── Обработка номера телефона ───────────────────────────────────────────
       if (!/^\d{9}$/.test(text)) {
         await ctx.reply(
-          "⚠️ Неверный формат номера.\n\n" +
-            "Введите 9 цифр в формате <b>XXX123456</b>, где XXX — код оператора.\n" +
-            "Пример: <code>500100500</code>",
+          "⚠️ Не удалось распознать ввод.\n\n" +
+            "Введите номер телефона (9 цифр): <code>500100500</code>\n" +
+            "Или клиентский код: <code>DIX-0001</code>",
           { parse_mode: "HTML" }
         );
         return;
       }
+
       const phoneUser = await userService.findUserByPhone(text);
       if (phoneUser) {
-        await ctx.reply(
-          "❌ Этот номер телефона уже зарегистрирован.\n\n" +
-            "Введите другой номер или обратитесь к менеджеру.",
-          { parse_mode: "HTML" }
-        );
+        if (phoneUser.telegram_id > 0n) {
+          // Уже привязан к реальному Telegram-аккаунту
+          if (phoneUser.telegram_id === BigInt(senderId)) {
+            regState.delete(senderId);
+            await ctx.reply(buildProfile(phoneUser.client_code, phoneUser.full_name, phoneUser.phone),
+              { parse_mode: "HTML", reply_markup: await getMenuKeyboard() });
+          } else {
+            await ctx.reply(
+              "❌ Этот номер телефона уже зарегистрирован.\n\nВведите другой номер или обратитесь к менеджеру.",
+              { parse_mode: "HTML" }
+            );
+          }
+          return;
+        }
+        // Создан администратором — привязываем Telegram
+        regState.delete(senderId);
+        const linked = await prisma.user.update({
+          where: { id: phoneUser.id },
+          data: { telegram_id: BigInt(senderId) },
+        });
+        await ctx.reply(buildProfile(linked.client_code, linked.full_name, linked.phone),
+          { parse_mode: "HTML", reply_markup: await getManagersKeyboard() });
+        await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard() });
         return;
       }
+
+      // Новый пользователь — переходим к вводу имени
       regState.set(senderId, { step: "name", phone: text });
       await ctx.reply("📝 Введите ваше ФИО (Фамилия Имя Отчество):", {
         reply_markup: { remove_keyboard: true },
