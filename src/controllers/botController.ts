@@ -86,7 +86,8 @@ function buildProfile(code: string, fullName: string, phone: string): string {
     `📃 Ваш профиль\n\n` +
     `🪪 Персональный КОД: <b>${code}</b>\n` +
     `👤 ФИО: ${fullName}\n` +
-    `📞 Номер: ${phone}`
+    `📞 Номер: ${phone}\n\n` +
+    `По возникшим вопросам обратитесь к специалисту ⬇️`
   );
 }
 
