@@ -38,6 +38,7 @@ jobs:
           target: production
           push: true
           tags: ${{ env.IMAGE }}:staging
+          build-args: APP_VERSION=staging
 
       - name: Copy compose file to server
         uses: appleboy/scp-action@v0.1.7
@@ -111,6 +112,7 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ steps.version.outputs.VERSION }}
+          build-args: APP_VERSION=${{ steps.version.outputs.VERSION }}
 
       - name: Copy compose file to server
         uses: appleboy/scp-action@v0.1.7
