@@ -54,7 +54,7 @@ model Setting {
 model User {
   id          Int         @id @default(autoincrement())
   telegram_id BigInt      @unique
-  phone       String
+  phone       String      @unique
   full_name   String
   client_code String      @unique
   packages    Package[]

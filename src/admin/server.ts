@@ -417,9 +417,11 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── Create user ────────────────────────────────────────────────────────────
 
   app.get("/admin/users/new", requireAuth, (req, res) => {
-    const phoneError = req.query.error === "phone";
+    const phoneError    = req.query.error === "phone";
+    const phoneDupError = req.query.error === "duplicate_phone";
     const body = `
-      ${phoneError ? `<div class="alert alert-danger">Неверный формат телефона. Введите ровно 9 цифр, например: <b>500123123</b></div>` : ""}
+      ${phoneError    ? `<div class="alert alert-danger">Неверный формат телефона. Введите ровно 9 цифр, например: <b>500123123</b></div>` : ""}
+      ${phoneDupError ? `<div class="alert alert-danger">Этот номер телефона уже используется другим пользователем.</div>` : ""}
       <div class="row">
         <div class="col-lg-6">
           <div class="card stat-card p-4">
@@ -499,16 +501,22 @@ export function createAdminApp(bot: Bot<Context>) {
       ? BigInt(telegram_id.trim())
       : BigInt(Date.now()) * -1n;
 
-    const newUser = await prisma.user.create({
-      data: {
-        full_name: full_name.trim(),
-        phone: cleanPhone,
-        client_code: code,
-        telegram_id: tgId,
-      },
-    });
-
-    res.redirect(`/admin/users/${newUser.id}?saved=1`);
+    try {
+      const newUser = await prisma.user.create({
+        data: {
+          full_name: full_name.trim(),
+          phone: cleanPhone,
+          client_code: code,
+          telegram_id: tgId,
+        },
+      });
+      res.redirect(`/admin/users/${newUser.id}?saved=1`);
+    } catch (e: any) {
+      if (e?.code === "P2002") {
+        return res.redirect("/admin/users/new?error=duplicate_phone");
+      }
+      throw e;
+    }
   });
 
   // ── User detail / edit ─────────────────────────────────────────────────────
@@ -519,6 +527,7 @@ export function createAdminApp(bot: Bot<Context>) {
 
     const saved     = req.query.saved === "1";
     const dupCode   = req.query.error === "duplicate_code";
+    const dupPhone  = req.query.error === "duplicate_phone";
     const pkgSaved  = req.query.pkg_saved === "1";
 
     const [packages, tariffSetting] = await Promise.all([
@@ -711,6 +720,7 @@ export function createAdminApp(bot: Bot<Context>) {
     const body = `
       ${saved    ? `<div class="alert alert-success">Изменения сохранены.</div>` : ""}
       ${dupCode  ? `<div class="alert alert-danger">Код клиента уже занят — введите другой.</div>` : ""}
+      ${dupPhone ? `<div class="alert alert-danger">Этот номер телефона уже используется другим пользователем.</div>` : ""}
       <div class="row g-4">
         <div class="col-lg-6">
           <div class="card stat-card p-4">
@@ -805,7 +815,9 @@ export function createAdminApp(bot: Bot<Context>) {
       res.redirect(`/admin/users/${req.params.id}?saved=1`);
     } catch (e: any) {
       if (e?.code === "P2002") {
-        res.redirect(`/admin/users/${req.params.id}?error=duplicate_code`);
+        const field = (e.meta?.target as string[] | undefined)?.[0] ?? "";
+        const errKey = field === "phone" ? "duplicate_phone" : "duplicate_code";
+        res.redirect(`/admin/users/${req.params.id}?error=${errKey}`);
       } else {
         throw e;
       }

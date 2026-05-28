@@ -478,6 +478,15 @@ export function registerControllers(bot: Bot<Context>): void {
         );
         return;
       }
+      const phoneUser = await userService.findUserByPhone(text);
+      if (phoneUser) {
+        await ctx.reply(
+          "❌ Этот номер телефона уже зарегистрирован.\n\n" +
+            "Введите другой номер или обратитесь к менеджеру.",
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
       regState.set(senderId, { step: "name", phone: text });
       await ctx.reply("📝 Введите ваше ФИО (Фамилия Имя Отчество):", {
         reply_markup: { remove_keyboard: true },
@@ -512,13 +521,7 @@ export function registerControllers(bot: Bot<Context>): void {
           return;
         }
 
-        const phoneUser = await userService.findUserByPhone(state.phone);
-        const newUser = phoneUser
-          ? await prisma.user.update({
-              where: { id: phoneUser.id },
-              data: { telegram_id: BigInt(senderId), full_name: text },
-            })
-          : await userService.createUser(BigInt(senderId), state.phone, text);
+        const newUser = await userService.createUser(BigInt(senderId), state.phone, text);
 
         await ctx.reply(
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
