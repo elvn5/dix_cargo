@@ -277,8 +277,8 @@ export function registerControllers(bot: Bot<Context>): void {
     const lines = packages.map((p) =>
       `📦 <b>${p.track_code}</b>\n` +
       `Статус: ${STATUS_LABEL[status].replace(/^\S+\s/, "")}\n` +
-      `Дата отправки: ${p.created_at.toLocaleDateString("ru-RU")}\n` +
-      `Дата поступления: ${p.updated_at.toLocaleDateString("ru-RU")}`
+      `Дата отправки: ${p.created_at.toLocaleDateString("ru-RU")}` +
+      (status !== "IN_TRANSIT" ? `\nДата поступления: ${p.updated_at.toLocaleDateString("ru-RU")}` : "")
     ).join("\n\n");
 
     const header = `${STATUS_LABEL[status]} — ${total} шт. (стр. ${safePage + 1}/${totalPages})\n\n`;
@@ -458,8 +458,8 @@ export function registerControllers(bot: Bot<Context>): void {
       await ctx.reply(
         `📦 ${pkg.track_code}\n` +
         `Статус посылки: ${STATUS_LABEL[pkg.status]}\n` +
-        `Дата отправки: ${pkg.created_at.toLocaleDateString("ru-RU")}\n` +
-        `Дата поступления: ${pkg.updated_at.toLocaleDateString("ru-RU")}`,
+        `Дата отправки: ${pkg.created_at.toLocaleDateString("ru-RU")}` +
+        (pkg.status !== "IN_TRANSIT" ? `\nДата поступления: ${pkg.updated_at.toLocaleDateString("ru-RU")}` : ""),
         { parse_mode: "HTML" }
       );
       return;
