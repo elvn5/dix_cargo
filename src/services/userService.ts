@@ -11,16 +11,13 @@ async function generateClientCode(): Promise<string> {
     select: { client_code: true },
   });
 
-  // Find the highest assigned number that is not in the exclusion list
-  const maxNumber = allCodes.reduce((max, u) => {
-    const n = parseInt(u.client_code.split("-")[1] ?? "0", 10);
-    if (EXCLUDED_CODE_NUMBERS.has(n)) return max;
-    return n > max ? n : max;
-  }, 0);
+  const takenNumbers = new Set(
+    allCodes.map(u => parseInt(u.client_code.split("-")[1] ?? "0", 10))
+  );
 
-  // Increment, skipping any excluded numbers
-  let next = maxNumber + 1;
-  while (EXCLUDED_CODE_NUMBERS.has(next)) next++;
+  // Find the first available number starting from 1, skipping excluded and taken
+  let next = 1;
+  while (EXCLUDED_CODE_NUMBERS.has(next) || takenNumbers.has(next)) next++;
 
   return `DIX-${String(next).padStart(4, "0")}`;
 }
