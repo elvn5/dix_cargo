@@ -231,7 +231,18 @@ export function registerControllers(bot: Bot<Context>): void {
       const code = user?.client_code ?? "????";
 
       const text = await getMarketplaceText(settingKey, code);
-      await ctx.reply(text, { parse_mode: "HTML" });
+
+      // Send the address block (<code>…</code>) as a separate message for easy copying,
+      // then send the rest of the instructions as a second message.
+      const codeEnd = text.indexOf("</code>");
+      if (codeEnd !== -1) {
+        const addressPart = text.slice(0, codeEnd + "</code>".length);
+        const restPart    = text.slice(codeEnd + "</code>".length).trimStart();
+        await ctx.reply(addressPart, { parse_mode: "HTML" });
+        if (restPart) await ctx.reply(restPart, { parse_mode: "HTML" });
+      } else {
+        await ctx.reply(text, { parse_mode: "HTML" });
+      }
 
       await ctx.replyWithPhoto(new InputFile(resolveMarketplaceFile(settingKey, "photo")));
       await ctx.replyWithVideo(new InputFile(resolveMarketplaceFile(settingKey, "video")));
