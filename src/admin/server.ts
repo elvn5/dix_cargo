@@ -60,7 +60,7 @@ function layout(title: string, body: string, active = ""): string {
 </head>
 <body>
 <header class="topbar d-flex d-md-none align-items-center justify-content-between px-3 py-2">
-  <span style="font-size:1.1rem;font-weight:700;color:#fff">✈️ DIX Cargo</span>
+  <span style="font-size:1.1rem;font-weight:700;color:#fff">✈️ DIX Cargo <span style="color:#f59e0b;font-size:.85rem">Тестовый</span></span>
   <button class="border-0 bg-transparent" data-bs-toggle="offcanvas" data-bs-target="#sidebar" style="color:#fff">
     <i class="bi bi-list fs-3"></i>
   </button>
@@ -68,10 +68,13 @@ function layout(title: string, body: string, active = ""): string {
 <div class="d-flex">
   <nav class="sidebar offcanvas-md offcanvas-start flex-column p-0" tabindex="-1" id="sidebar">
     <div class="offcanvas-header d-md-none" style="background:#1a1f36;border-bottom:1px solid #2d3561">
-      <span style="font-size:1.1rem;font-weight:700;color:#fff">✈️ DIX Cargo</span>
+      <span style="font-size:1.1rem;font-weight:700;color:#fff">✈️ DIX Cargo <span style="color:#f59e0b;font-size:.85rem">Тестовый</span></span>
       <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" data-bs-target="#sidebar"></button>
     </div>
-    <div class="brand d-none d-md-block">✈️ DIX Cargo</div>
+    <div class="brand d-none d-md-block">
+      ✈️ DIX Cargo
+      <div style="font-size:.95rem;font-weight:800;color:#f59e0b;letter-spacing:.03em;margin-top:.15rem">ТЕСТОВЫЙ</div>
+    </div>
     <div class="nav flex-column mt-2 gap-1 flex-grow-1">
       ${nav("/admin", "Дашборд", '<i class="bi bi-speedometer2"></i>')}
       ${nav("/admin/users", "Пользователи", '<i class="bi bi-people"></i>')}
