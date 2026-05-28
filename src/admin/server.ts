@@ -1200,7 +1200,7 @@ export function createAdminApp(bot: Bot<Context>) {
               </div>
               <div class="mb-3">
                 <label class="form-label fw-semibold">Трек-код</label>
-                <input name="track_code" class="form-control font-monospace" required placeholder="RU123456789CN"/>
+                <input name="track_code" id="newTrackCode" class="form-control font-monospace" required placeholder="RU123456789CN" autocomplete="off"/>
               </div>
               <div class="mb-3">
                 <label class="form-label fw-semibold">Статус</label>
@@ -1235,6 +1235,11 @@ export function createAdminApp(bot: Bot<Context>) {
                 const p = document.getElementById('newPrice');
                 w.addEventListener('input', function() {
                   if (tariff > 0 && w.value !== '') p.value = (parseFloat(w.value) * tariff).toFixed(2);
+                });
+
+                // Prevent barcode scanner's trailing Enter from submitting the form
+                document.getElementById('newTrackCode').addEventListener('keydown', function(e) {
+                  if (e.key === 'Enter') e.preventDefault();
                 });
               })();
             </script>
