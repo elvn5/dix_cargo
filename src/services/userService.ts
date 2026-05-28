@@ -1,18 +1,28 @@
 import prisma from "../database/prismaClient";
 import type { User } from "@prisma/client";
 
+const EXCLUDED_CODE_NUMBERS = new Set([
+  2222, 11111, 9999, 2806, 1222, 1234,
+  1989, 1991, 2101, 3333, 1920, 5555,
+]);
+
 async function generateClientCode(): Promise<string> {
   const allCodes = await prisma.user.findMany({
     select: { client_code: true },
   });
 
+  // Find the highest assigned number that is not in the exclusion list
   const maxNumber = allCodes.reduce((max, u) => {
     const n = parseInt(u.client_code.split("-")[1] ?? "0", 10);
+    if (EXCLUDED_CODE_NUMBERS.has(n)) return max;
     return n > max ? n : max;
   }, 0);
 
-  const paddedNumber = String(maxNumber + 1).padStart(4, "0");
-  return `DIX-${paddedNumber}`;
+  // Increment, skipping any excluded numbers
+  let next = maxNumber + 1;
+  while (EXCLUDED_CODE_NUMBERS.has(next)) next++;
+
+  return `DIX-${String(next).padStart(4, "0")}`;
 }
 
 async function generateUniqueClientCode(): Promise<string> {
