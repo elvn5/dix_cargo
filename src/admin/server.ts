@@ -20,6 +20,7 @@ const ADMIN_EMAIL    = process.env.ADMIN_EMAIL    ?? "admin@dixcargo.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "changeme";
 const COOKIE_SECRET  = process.env.ADMIN_COOKIE_SECRET ?? "dix-admin-secret";
 const PORT           = Number(process.env.ADMIN_PORT ?? 3000);
+const APP_VERSION    = process.env.APP_VERSION ?? "dev";
 
 // ── HTML helpers ─────────────────────────────────────────────────────────────
 
@@ -83,6 +84,9 @@ function layout(title: string, body: string, active = ""): string {
       <a href="/admin/logout" class="btn btn-outline-light btn-sm w-100">
         <i class="bi bi-box-arrow-right"></i> Выйти
       </a>
+      <div class="text-center mt-2" style="font-size:.7rem;color:#6c757d;opacity:.7">
+        v${APP_VERSION}
+      </div>
     </div>
   </nav>
   <main class="main flex-grow-1">
