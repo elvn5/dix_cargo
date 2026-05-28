@@ -836,6 +836,69 @@ export function createAdminApp(bot: Bot<Context>) {
     ));
   });
 
+  // ── Packages export ───────────────────────────────────────────────────────
+
+  app.get("/admin/packages/export", requireAuth, async (req, res) => {
+    const search   = ((req.query.search as string) ?? "").trim();
+    const statusQ  = (req.query.status  as string) ?? "";
+    const dateFrom = (req.query.date_from as string) ?? "";
+    const dateTo   = (req.query.date_to   as string) ?? "";
+    const tab      = (req.query.tab as string) === "archive" ? "archive" : "active";
+
+    const where: Record<string, unknown> = {};
+    if (search) where.track_code = { contains: search, mode: "insensitive" };
+
+    if (tab === "archive") {
+      where.status = "DELIVERED";
+    } else {
+      where.status = statusQ && statusQ !== "DELIVERED" ? statusQ : { not: "DELIVERED" };
+    }
+
+    if (dateFrom || dateTo) {
+      const range: Record<string, Date> = {};
+      if (dateFrom) range.gte = new Date(dateFrom);
+      if (dateTo)   range.lte = new Date(dateTo + "T23:59:59.999Z");
+      where.created_at = range;
+    }
+
+    const packages = await prisma.package.findMany({
+      where,
+      include: { user: { select: { client_code: true, full_name: true } } },
+      orderBy: { created_at: "desc" },
+    });
+
+    const STATUS_LABEL: Record<string, string> = {
+      IN_OFFICE:  "В офисе",
+      IN_TRANSIT: "В пути",
+      DELIVERED:  "Выдан",
+    };
+
+    const wsData = [
+      ["Трек-код", "Статус", "DIX-код", "Клиент", "Вес (кг)", "Цена (сом)", "Дата"],
+      ...packages.map(p => [
+        p.track_code,
+        STATUS_LABEL[p.status] ?? p.status,
+        p.user.client_code,
+        p.user.full_name,
+        p.weight ?? "",
+        p.price  ?? "",
+        p.created_at.toLocaleString("ru-RU"),
+      ]),
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, "Посылки");
+
+    const buf      = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const tabLabel = tab === "archive" ? "archive" : "active";
+    const filename = `packages_${tabLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(buf);
+  });
+
   // ── Packages list ─────────────────────────────────────────────────────────
 
   app.get("/admin/packages", requireAuth, async (req, res) => {
@@ -955,6 +1018,10 @@ export function createAdminApp(bot: Bot<Context>) {
         <div class="d-flex gap-2 flex-wrap">
           <a href="/admin/packages/import" class="btn btn-outline-success btn-sm">
             <i class="bi bi-file-earmark-excel"></i> Импорт Excel
+          </a>
+          <a href="/admin/packages/export?tab=${tab}&search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusQ)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}"
+             class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-download"></i> Скачать Excel
           </a>
           ${tab === "active" ? `<a href="/admin/packages/new" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Добавить</a>` : ""}
         </div>
