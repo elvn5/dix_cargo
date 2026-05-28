@@ -545,7 +545,7 @@ export function createAdminApp(bot: Bot<Context>) {
     const pkgRows = packages.map(p => `
       <tr>
         <td class="text-center" style="width:40px">
-          <input type="checkbox" name="ids" value="${p.id}" class="form-check-input pkg-cb">
+          <input type="checkbox" name="ids" value="${p.id}" class="form-check-input pkg-cb" data-track="${p.track_code}">
         </td>
         <td class="font-monospace small">${p.track_code}</td>
         <td><span class="badge ${STATUS_BADGE[p.status]}">${STATUS_LABEL[p.status]}</span></td>
@@ -557,7 +557,13 @@ export function createAdminApp(bot: Bot<Context>) {
       <div class="card stat-card mt-4">
         <div class="card-header bg-white d-flex align-items-center justify-content-between flex-wrap gap-2">
           <span class="fw-semibold">Посылки <span class="badge bg-secondary">${packages.length}</span></span>
-          ${pkgSaved ? `<span class="text-success small"><i class="bi bi-check-circle"></i> Статусы обновлены</span>` : ""}
+          <div class="d-flex align-items-center gap-2">
+            ${pkgSaved ? `<span class="text-success small"><i class="bi bi-check-circle"></i> Статусы обновлены</span>` : ""}
+            <span id="scan-badge" class="badge bg-secondary d-flex align-items-center gap-1" title="Наведите сканер и сканируйте трек-код">
+              <i class="bi bi-upc-scan"></i> Сканер
+            </span>
+            <span id="scan-result" class="small d-none"></span>
+          </div>
         </div>
         ${packages.length === 0
           ? `<div class="p-4 text-muted text-center">Посылок нет</div>`
@@ -638,6 +644,68 @@ export function createAdminApp(bot: Bot<Context>) {
         document.querySelectorAll('.pkg-cb').forEach(c =>
           c.addEventListener('change', updateState)
         );
+
+        // ── Barcode scanner support ──────────────────────────────────────────
+        const scanBadge  = document.getElementById('scan-badge');
+        const scanResult = document.getElementById('scan-result');
+        let scanBuffer = '';
+        let scanTimer  = null;
+
+        function processScan(raw) {
+          const code = raw.trim();
+          if (!code) return;
+
+          const cb = [...document.querySelectorAll('.pkg-cb')]
+            .find(el => el.dataset.track === code);
+
+          if (cb) {
+            cb.checked = true;
+            updateState();
+            // Highlight row
+            const row = cb.closest('tr');
+            row.style.transition = 'background .2s';
+            row.style.background = '#d1f7e0';
+            setTimeout(() => row.style.background = '', 1800);
+            // Badge feedback
+            scanBadge.className = 'badge bg-success d-flex align-items-center gap-1';
+            scanResult.className = 'small text-success';
+            scanResult.textContent = '✓ ' + code;
+          } else {
+            scanBadge.className = 'badge bg-danger d-flex align-items-center gap-1';
+            scanResult.className = 'small text-danger';
+            scanResult.textContent = '✗ ' + code + ' — не найден';
+          }
+
+          scanResult.classList.remove('d-none');
+          clearTimeout(scanTimer);
+          scanTimer = setTimeout(() => {
+            scanBadge.className = 'badge bg-secondary d-flex align-items-center gap-1';
+            scanResult.classList.add('d-none');
+          }, 3000);
+        }
+
+        let bufTimer = null;
+        document.addEventListener('keydown', function(e) {
+          // Ignore when typing in form fields
+          if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+
+          if (e.key === 'Enter') {
+            if (scanBuffer) processScan(scanBuffer);
+            scanBuffer = '';
+            clearTimeout(bufTimer);
+            return;
+          }
+
+          if (e.key.length === 1) {
+            scanBuffer += e.key;
+            clearTimeout(bufTimer);
+            // Auto-flush if scanner doesn't send Enter (fallback, 150 ms)
+            bufTimer = setTimeout(() => {
+              if (scanBuffer) processScan(scanBuffer);
+              scanBuffer = '';
+            }, 150);
+          }
+        });
       </script>`;
 
     const body = `
