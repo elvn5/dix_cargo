@@ -431,7 +431,29 @@ export function registerControllers(bot: Bot<Context>): void {
     // Шаги регистрации
     const state = regState.get(senderId);
     if (!state) {
-      await ctx.reply("Отправьте /start для начала работы.");
+      // Зарегистрированный пользователь без активного состояния — ищем по трек-номеру
+      const user = await userService.findUserByTelegramId(BigInt(senderId));
+      if (!user) {
+        await ctx.reply("Отправьте /start для начала работы.");
+        return;
+      }
+
+      const pkg = await prisma.package.findFirst({
+        where: { user_id: user.id, track_code: text },
+      });
+
+      if (!pkg) {
+        await ctx.reply(`❌ Посылка с трек-номером <code>${text}</code> не найдена.`, { parse_mode: "HTML" });
+        return;
+      }
+
+      await ctx.reply(
+        `📦 ${pkg.track_code}\n` +
+        `Статус посылки: ${STATUS_LABEL[pkg.status]}\n` +
+        `Дата отправки: ${pkg.created_at.toLocaleDateString("ru-RU")}` +
+        (pkg.status !== "IN_TRANSIT" ? `\nДата поступления: ${pkg.updated_at.toLocaleDateString("ru-RU")}` : ""),
+        { parse_mode: "HTML" }
+      );
       return;
     }
 
@@ -452,12 +474,6 @@ export function registerControllers(bot: Bot<Context>): void {
         await ctx.reply(`❌ Посылка с трек-номером <code>${text}</code> не найдена.`, { parse_mode: "HTML" });
         return;
       }
-
-      const STATUS_LABEL: Record<string, string> = {
-        IN_OFFICE:  "В офисе",
-        IN_TRANSIT: "В пути",
-        DELIVERED:  "Выдан",
-      };
 
       await ctx.reply(
         `📦 ${pkg.track_code}\n` +
