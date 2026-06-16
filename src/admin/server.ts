@@ -9,6 +9,7 @@ import { parseClientCode } from "../utils/parseClientCode";
 import { parseShippingDate } from "../utils/parseShippingDate";
 import fs from "fs";
 import path from "path";
+import { spawn } from "child_process";
 
 declare module "express-session" {
   interface SessionData {
@@ -1518,10 +1519,49 @@ export function createAdminApp(bot: Bot<Context>) {
               </button>
             </form>
           </div>
+
+          <div class="card stat-card p-4">
+            <h5 class="fw-bold mb-3">🗄 База данных</h5>
+            <p class="text-muted small mb-3">Полный SQL-дамп текущей базы данных.</p>
+            <a href="/admin/db-dump" class="btn btn-outline-secondary fw-semibold">
+              <i class="bi bi-download"></i> Скачать дамп базы данных
+            </a>
+          </div>
         </div>
       </div>`;
 
     res.send(layout("Настройки бота", body, "/admin/settings"));
+  });
+
+  app.get("/admin/db-dump", requireAuth, (_req, res) => {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      res.status(500).send("DATABASE_URL не задан");
+      return;
+    }
+
+    const dump = spawn("pg_dump", [databaseUrl, "--no-owner", "--no-privileges"]);
+
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    dump.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    dump.stderr.on("data", (chunk: Buffer) => { stderr += chunk; });
+
+    dump.on("error", (err) => {
+      res.status(500).send(`Не удалось запустить pg_dump: ${err.message}`);
+    });
+
+    dump.on("close", (code) => {
+      if (code !== 0) {
+        console.error("pg_dump failed:", stderr);
+        res.status(500).send(`pg_dump завершился с ошибкой (код ${code}): ${stderr}`);
+        return;
+      }
+      const filename = `dump_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.sql`;
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "application/sql");
+      res.send(Buffer.concat(chunks));
+    });
   });
 
   app.post("/admin/settings", requireAuth, async (req, res) => {
