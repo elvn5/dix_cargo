@@ -5,6 +5,9 @@ FROM node:22-alpine AS development
 
 WORKDIR /app
 
+# pg_dump для кнопки "Скачать дамп базы данных" в админке
+RUN apk add --no-cache postgresql16-client
+
 COPY package*.json ./
 COPY prisma ./prisma/
 
@@ -53,6 +56,9 @@ WORKDIR /app
 ARG APP_VERSION=dev
 ENV NODE_ENV=production
 ENV APP_VERSION=${APP_VERSION}
+
+# pg_dump для кнопки "Скачать дамп базы данных" в админке
+RUN apk add --no-cache postgresql16-client
 
 RUN npm install -g npm@11
 
