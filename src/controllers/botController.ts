@@ -80,6 +80,21 @@ async function getManagersKeyboard() {
   };
 }
 
+async function sendRegistrationAddress(ctx: Context, code: string): Promise<void> {
+  const text = await getMarketplaceText("marketplace_pinduoduo", code);
+  const fullText = `Ваш адрес:\n\n${text}`;
+
+  const codeEnd = fullText.indexOf("</code>");
+  if (codeEnd !== -1) {
+    const addressPart = fullText.slice(0, codeEnd + "</code>".length);
+    const restPart    = fullText.slice(codeEnd + "</code>".length).trimStart();
+    await ctx.reply(addressPart, { parse_mode: "HTML" });
+    if (restPart) await ctx.reply(restPart, { parse_mode: "HTML" });
+  } else {
+    await ctx.reply(fullText, { parse_mode: "HTML" });
+  }
+}
+
 function buildProfile(code: string, fullName: string, phone: string): string {
   return (
     `✅ Вы успешно зарегистрированы\n\n` +
@@ -565,6 +580,7 @@ export function registerControllers(bot: Bot<Context>): void {
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
           { parse_mode: "HTML", reply_markup: await getManagersKeyboard() }
         );
+        await sendRegistrationAddress(ctx, newUser.client_code);
         await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard() });
       } catch (error) {
         console.error("[Registration] Ошибка при создании пользователя:", error);
