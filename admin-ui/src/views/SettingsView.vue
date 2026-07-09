@@ -7,30 +7,32 @@ pageTitle.value = "Настройки бота";
 
 const form = reactive({
   tariff_per_kg: "",
-  manager_1_name: "",
-  manager_1_url: "",
-  manager_2_name: "",
-  manager_2_url: "",
   forbidden_items: "",
 });
 
+const managers = ref<{ name: string; url: string }[]>([]);
 const saved = ref(false);
 const submitting = ref(false);
 
 async function load() {
-  const data = await api.get<{ settings: Record<string, string> }>("/admin/settings");
+  const data = await api.get<{ settings: Record<string, string>; managers: { name: string; url: string }[] }>("/admin/settings");
   form.tariff_per_kg = data.settings.tariff_per_kg ?? "";
-  form.manager_1_name = data.settings.manager_1_name ?? "Лидия";
-  form.manager_1_url = data.settings.manager_1_url ?? "https://wa.me/996550867414";
-  form.manager_2_name = data.settings.manager_2_name ?? "Виктория";
-  form.manager_2_url = data.settings.manager_2_url ?? "https://wa.me/996556969906";
   form.forbidden_items = data.settings.forbidden_items ?? "";
+  managers.value = data.managers.length ? data.managers.map(m => ({ ...m })) : [{ name: "", url: "" }];
+}
+
+function addManager() {
+  managers.value.push({ name: "", url: "" });
+}
+
+function removeManager(index: number) {
+  managers.value.splice(index, 1);
 }
 
 async function save() {
   submitting.value = true;
   try {
-    await api.put("/admin/settings", form);
+    await api.put("/admin/settings", { ...form, managers: managers.value });
     saved.value = true;
   } finally {
     submitting.value = false;
@@ -58,24 +60,34 @@ onMounted(load);
 
         <div>
           <h2 class="font-bold mb-3">👥 Кнопки менеджеров</h2>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="field-label">Менеджер 1 — имя</label>
-              <input v-model="form.manager_1_name" class="input" placeholder="Лидия" />
-            </div>
-            <div>
-              <label class="field-label">Менеджер 1 — ссылка</label>
-              <input v-model="form.manager_1_url" type="url" class="input" placeholder="https://wa.me/..." />
-            </div>
-            <div>
-              <label class="field-label">Менеджер 2 — имя</label>
-              <input v-model="form.manager_2_name" class="input" placeholder="Виктория" />
-            </div>
-            <div>
-              <label class="field-label">Менеджер 2 — ссылка</label>
-              <input v-model="form.manager_2_url" type="url" class="input" placeholder="https://wa.me/..." />
+          <div class="space-y-3">
+            <div
+              v-for="(manager, index) in managers"
+              :key="index"
+              class="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 sm:items-end"
+            >
+              <div>
+                <label class="field-label">Имя</label>
+                <input v-model="manager.name" class="input" placeholder="Имя менеджера" />
+              </div>
+              <div>
+                <label class="field-label">Ссылка</label>
+                <input v-model="manager.url" type="url" class="input" placeholder="https://wa.me/..." />
+              </div>
+              <button
+                type="button"
+                class="btn btn-outline"
+                data-test="remove-manager"
+                :disabled="managers.length <= 1"
+                @click="removeManager(index)"
+              >
+                <i class="bi bi-trash"></i>
+              </button>
             </div>
           </div>
+          <button type="button" class="btn btn-outline mt-3" data-test="add-manager" @click="addManager">
+            <i class="bi bi-plus-lg"></i> Добавить менеджера
+          </button>
         </div>
 
         <hr class="border-slate-200" />

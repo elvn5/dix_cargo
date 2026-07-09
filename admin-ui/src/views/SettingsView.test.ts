@@ -19,20 +19,30 @@ function flushPromises() {
 }
 
 describe("SettingsView", () => {
-  it("applies defaults for missing manager fields", async () => {
-    vi.mocked(api.get).mockResolvedValue({ settings: {} });
+  it("loads manager buttons returned by the API", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      settings: {},
+      managers: [{ name: "Лидия", url: "https://wa.me/996550867414" }, { name: "Виктория", url: "https://wa.me/996556969906" }],
+    });
     const wrapper = mount(SettingsView);
     await flushPromises();
-    expect((wrapper.find('input[placeholder="Лидия"]').element as HTMLInputElement).value).toBe("Лидия");
-    expect((wrapper.find('input[placeholder="Виктория"]').element as HTMLInputElement).value).toBe("Виктория");
+    const nameInputs = wrapper.findAll('input[placeholder="Имя менеджера"]');
+    expect(nameInputs).toHaveLength(2);
+    expect((nameInputs[0].element as HTMLInputElement).value).toBe("Лидия");
+    expect((nameInputs[1].element as HTMLInputElement).value).toBe("Виктория");
+  });
+
+  it("falls back to one empty row when no managers are configured", async () => {
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [] });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.findAll('input[placeholder="Имя менеджера"]')).toHaveLength(1);
   });
 
   it("loads saved values when present", async () => {
     vi.mocked(api.get).mockResolvedValue({
-      settings: {
-        tariff_per_kg: "150", manager_1_name: "Аня", manager_1_url: "https://wa.me/1",
-        manager_2_name: "Боря", manager_2_url: "https://wa.me/2", forbidden_items: "золото",
-      },
+      settings: { tariff_per_kg: "150", forbidden_items: "золото" },
+      managers: [{ name: "Аня", url: "https://wa.me/1" }],
     });
     const wrapper = mount(SettingsView);
     await flushPromises();
@@ -40,8 +50,29 @@ describe("SettingsView", () => {
     expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("золото");
   });
 
+  it("adds and removes manager rows, allowing an unlimited number of buttons", async () => {
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [{ name: "Лидия", url: "https://wa.me/1" }] });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+
+    for (let i = 0; i < 4; i++) {
+      await wrapper.find('[data-test="add-manager"]').trigger("click");
+    }
+    expect(wrapper.findAll('input[placeholder="Имя менеджера"]')).toHaveLength(5);
+
+    await wrapper.findAll('[data-test="remove-manager"]')[0].trigger("click");
+    expect(wrapper.findAll('input[placeholder="Имя менеджера"]')).toHaveLength(4);
+  });
+
+  it("disables the remove button when only one manager row remains", async () => {
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [{ name: "Лидия", url: "https://wa.me/1" }] });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.find('[data-test="remove-manager"]').attributes("disabled")).toBeDefined();
+  });
+
   it("saves and shows a success banner", async () => {
-    vi.mocked(api.get).mockResolvedValue({ settings: {} });
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [{ name: "Лидия", url: "https://wa.me/1" }] });
     vi.mocked(api.put).mockResolvedValue({ ok: true });
     const wrapper = mount(SettingsView);
     await flushPromises();
@@ -49,12 +80,15 @@ describe("SettingsView", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(api.put).toHaveBeenCalledWith("/admin/settings", expect.objectContaining({ manager_1_name: "Лидия" }));
+    expect(api.put).toHaveBeenCalledWith(
+      "/admin/settings",
+      expect.objectContaining({ managers: [{ name: "Лидия", url: "https://wa.me/1" }] }),
+    );
     expect(wrapper.text()).toContain("Изменения сохранены");
   });
 
   it("links to the db-dump download endpoint", async () => {
-    vi.mocked(api.get).mockResolvedValue({ settings: {} });
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [] });
     const wrapper = mount(SettingsView);
     await flushPromises();
     expect(wrapper.find('a[href="/api/admin/db-dump"]').exists()).toBe(true);

@@ -598,13 +598,41 @@ describe("promocodes routes", () => {
 // ── Настройки ────────────────────────────────────────────────────────────────
 
 describe("settings routes", () => {
-  it("GET /settings returns a key/value map", async () => {
-    const db = fakeDb({ setting: { findMany: vi.fn().mockResolvedValue([{ key: "tariff_per_kg", value: "100" }]) } });
+  it("GET /settings returns a key/value map and default managers when none are saved", async () => {
+    const db = fakeDb({
+      setting: {
+        findMany: vi.fn().mockResolvedValue([{ key: "tariff_per_kg", value: "100" }]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
     getPrismaMock.mockReturnValue(db);
     const app = buildApp();
     const agent = await loginAgent(app);
     const res = await agent.get("/api/admin/settings");
     expect(res.body.settings).toEqual({ tariff_per_kg: "100" });
+    expect(res.body.managers).toEqual([
+      { name: "Лидия", url: "https://wa.me/996550867414" },
+      { name: "Виктория", url: "https://wa.me/996556969906" },
+    ]);
+  });
+
+  it("GET /settings returns managers stored as JSON, including more than two", async () => {
+    const managers = [
+      { name: "Аня", url: "https://wa.me/1" },
+      { name: "Боря", url: "https://wa.me/2" },
+      { name: "Вика", url: "https://wa.me/3" },
+    ];
+    const db = fakeDb({
+      setting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({ key: "manager_buttons", value: JSON.stringify(managers) }),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/settings");
+    expect(res.body.managers).toEqual(managers);
   });
 
   it("PUT /settings upserts only known keys", async () => {
@@ -616,6 +644,25 @@ describe("settings routes", () => {
     expect(db.setting.upsert).toHaveBeenCalledTimes(1);
     expect(db.setting.upsert).toHaveBeenCalledWith({
       where: { key: "tariff_per_kg" }, update: { value: "150" }, create: { key: "tariff_per_kg", value: "150" },
+    });
+  });
+
+  it("PUT /settings stores an arbitrary number of manager buttons as JSON", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const managers = [
+      { name: "Аня", url: "https://wa.me/1" },
+      { name: "Боря", url: "https://wa.me/2" },
+      { name: "Вика", url: "https://wa.me/3" },
+      { name: "  ", url: "https://wa.me/4" },
+    ];
+    await agent.put("/api/admin/settings").send({ managers });
+    expect(db.setting.upsert).toHaveBeenCalledWith({
+      where: { key: "manager_buttons" },
+      update: { value: JSON.stringify(managers.slice(0, 3)) },
+      create: { key: "manager_buttons", value: JSON.stringify(managers.slice(0, 3)) },
     });
   });
 });
