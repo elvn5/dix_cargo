@@ -3,7 +3,7 @@ import session from "express-session";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { Bot, Context } from "grammy";
-import prisma from "../database/prismaClient";
+import { getPrisma, getDatabaseUrl, BRANCHES, DEFAULT_BRANCH, branchLabel, clientCodePrefix, isBranch, type Branch } from "../database/prismaClient";
 import { userService } from "../services/userService";
 import { parseClientCode } from "../utils/parseClientCode";
 import { parseShippingDate } from "../utils/parseShippingDate";
@@ -14,6 +14,7 @@ import { spawn } from "child_process";
 declare module "express-session" {
   interface SessionData {
     admin: boolean;
+    branch?: Branch;
   }
 }
 
@@ -24,9 +25,25 @@ const PORT           = Number(process.env.ADMIN_PORT ?? 3000);
 const APP_VERSION    = process.env.APP_VERSION ?? "dev";
 const IS_STAGING     = APP_VERSION === "staging";
 
+// ── Филиалы ───────────────────────────────────────────────────────────────────
+
+function getBranch(req: Request): Branch {
+  return req.session.branch ?? DEFAULT_BRANCH;
+}
+
 // ── HTML helpers ─────────────────────────────────────────────────────────────
 
-function layout(title: string, body: string, active = ""): string {
+function layout(title: string, body: string, active = "", req?: Request): string {
+  const branch      = req ? getBranch(req) : DEFAULT_BRANCH;
+  const currentPath  = req?.originalUrl ?? "/admin";
+  const branchSwitcher = BRANCHES.map(({ key, label }) => {
+    const isActive = key === branch;
+    const cls = isActive ? "btn btn-sm btn-light fw-semibold" : "btn btn-sm btn-outline-light";
+    return isActive
+      ? `<span class="${cls}" style="pointer-events:none">${label}</span>`
+      : `<a href="/admin/branch/${key}?back=${encodeURIComponent(currentPath)}" class="${cls}">${label}</a>`;
+  }).join(" ");
+
   const nav = (href: string, label: string, icon: string) => {
     const cls = active === href ? "nav-link active fw-semibold" : "nav-link text-white-50";
     return `<a href="${href}" class="${cls}">${icon} ${label}</a>`;
@@ -76,6 +93,10 @@ function layout(title: string, body: string, active = ""): string {
     <div class="brand d-none d-md-block">
       ✈️ DIX Cargo
       ${IS_STAGING ? '<div style="font-size:.95rem;font-weight:800;color:#f59e0b;letter-spacing:.03em;margin-top:.15rem">ТЕСТОВЫЙ</div>' : ""}
+    </div>
+    <div class="px-3 py-2 border-bottom border-secondary">
+      <div class="text-white-50 mb-1" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.05em">🏢 Филиал</div>
+      <div class="d-flex gap-1 flex-wrap">${branchSwitcher}</div>
     </div>
     <div class="nav flex-column mt-2 gap-1 flex-grow-1">
       ${nav("/admin", "Дашборд", '<i class="bi bi-speedometer2"></i>')}
@@ -174,6 +195,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 async function notifyStatusChange(
   bot: Bot<Context>,
+  db: ReturnType<typeof getPrisma>,
   userId: number,
   clientCode: string,
   trackCodes: string[],
@@ -182,7 +204,7 @@ async function notifyStatusChange(
   price?: number | null,
 ) {
   try {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await db.user.findUnique({ where: { id: userId } });
     if (!user || user.telegram_id <= 0n) return;
 
     const isSingle  = trackCodes.length === 1;
@@ -239,9 +261,19 @@ export function createAdminApp(bot: Bot<Context>) {
     req.session.destroy(() => res.redirect("/admin/login"));
   });
 
+  // ── Переключение филиала ──────────────────────────────────────────────────
+
+  app.get("/admin/branch/:branch", requireAuth, (req, res) => {
+    const branch = req.params.branch;
+    if (typeof branch === "string" && isBranch(branch)) req.session.branch = branch;
+    const back = typeof req.query.back === "string" ? req.query.back : "/admin";
+    res.redirect(back.startsWith("/admin") ? back : "/admin");
+  });
+
   // ── Dashboard ──────────────────────────────────────────────────────────────
 
-  app.get("/admin", requireAuth, async (_req, res) => {
+  app.get("/admin", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const now   = new Date();
     const sod   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const sow   = new Date(sod); sow.setDate(sod.getDate() - sod.getDay() || 7);
@@ -257,20 +289,20 @@ export function createAdminApp(bot: Bot<Context>) {
       pkgOffice, pkgTransit, pkgDelivered,
       latestUsers,
     ] = await Promise.all([
-      prisma.user.count(),
-      prisma.package.count(),
-      prisma.user.count({ where: { created_at: since(sod) } }),
-      prisma.user.count({ where: { created_at: since(sow) } }),
-      prisma.user.count({ where: { created_at: since(som) } }),
-      prisma.user.count({ where: { created_at: since(soy) } }),
-      prisma.package.count({ where: { created_at: since(sod) } }),
-      prisma.package.count({ where: { created_at: since(sow) } }),
-      prisma.package.count({ where: { created_at: since(som) } }),
-      prisma.package.count({ where: { created_at: since(soy) } }),
-      prisma.package.count({ where: { status: "IN_OFFICE" } }),
-      prisma.package.count({ where: { status: "IN_TRANSIT" } }),
-      prisma.package.count({ where: { status: "DELIVERED" } }),
-      prisma.user.findMany({ orderBy: { created_at: "desc" }, take: 5 }),
+      db.user.count(),
+      db.package.count(),
+      db.user.count({ where: { created_at: since(sod) } }),
+      db.user.count({ where: { created_at: since(sow) } }),
+      db.user.count({ where: { created_at: since(som) } }),
+      db.user.count({ where: { created_at: since(soy) } }),
+      db.package.count({ where: { created_at: since(sod) } }),
+      db.package.count({ where: { created_at: since(sow) } }),
+      db.package.count({ where: { created_at: since(som) } }),
+      db.package.count({ where: { created_at: since(soy) } }),
+      db.package.count({ where: { status: "IN_OFFICE" } }),
+      db.package.count({ where: { status: "IN_TRANSIT" } }),
+      db.package.count({ where: { status: "DELIVERED" } }),
+      db.user.findMany({ orderBy: { created_at: "desc" }, take: 5 }),
     ]);
 
     const statCard = (label: string, value: number, color = "text-primary") =>
@@ -339,12 +371,13 @@ export function createAdminApp(bot: Bot<Context>) {
         </div>
       </div>`;
 
-    res.send(layout("Дашборд", body, "/admin"));
+    res.send(layout("Дашборд", body, "/admin", req));
   });
 
   // ── Users list ─────────────────────────────────────────────────────────────
 
   app.get("/admin/users", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const page  = Math.max(1, Number(req.query.page ?? 1));
     const limit = 20;
     const skip  = (page - 1) * limit;
@@ -359,8 +392,8 @@ export function createAdminApp(bot: Bot<Context>) {
       : {};
 
     const [users, total] = await Promise.all([
-      prisma.user.findMany({ where, orderBy: { id: "desc" }, skip, take: limit }),
-      prisma.user.count({ where }),
+      db.user.findMany({ where, orderBy: { id: "desc" }, skip, take: limit }),
+      db.user.count({ where }),
     ]);
 
     const pages = Math.ceil(total / limit);
@@ -416,7 +449,7 @@ export function createAdminApp(bot: Bot<Context>) {
         ${pagination ? `<div class="card-footer bg-white">${pagination}</div>` : ""}
       </div>`;
 
-    res.send(layout("Пользователи", body, "/admin/users"));
+    res.send(layout("Пользователи", body, "/admin/users", req));
   });
 
   // ── Create user ────────────────────────────────────────────────────────────
@@ -424,6 +457,7 @@ export function createAdminApp(bot: Bot<Context>) {
   app.get("/admin/users/new", requireAuth, (req, res) => {
     const phoneError    = req.query.error === "phone";
     const phoneDupError = req.query.error === "duplicate_phone";
+    const codePrefix    = clientCodePrefix(getBranch(req));
     const body = `
       ${phoneError    ? `<div class="alert alert-danger">Неверный формат телефона. Введите ровно 9 цифр, например: <b>500123123</b></div>` : ""}
       ${phoneDupError ? `<div class="alert alert-danger">Этот номер телефона уже используется другим пользователем.</div>` : ""}
@@ -450,7 +484,7 @@ export function createAdminApp(bot: Bot<Context>) {
                   Персональный КОД
                   <span class="text-muted fw-normal">(оставьте пустым — сгенерируется автоматически)</span>
                 </label>
-                <input name="client_code" class="form-control" placeholder="DIX-001"/>
+                <input name="client_code" class="form-control" placeholder="${codePrefix}-0001"/>
               </div>
               <div class="mb-4">
                 <label class="form-label fw-semibold">
@@ -485,10 +519,12 @@ export function createAdminApp(bot: Bot<Context>) {
         </div>
       </div>`;
 
-    res.send(layout("Новый пользователь", body, "/admin/users"));
+    res.send(layout("Новый пользователь", body, "/admin/users", req));
   });
 
   app.post("/admin/users/new", requireAuth, async (req, res) => {
+    const branch = getBranch(req);
+    const db = getPrisma(branch);
     const { full_name, phone, client_code, telegram_id } =
       req.body as Record<string, string>;
 
@@ -499,7 +535,7 @@ export function createAdminApp(bot: Bot<Context>) {
 
     let code = client_code?.trim();
     if (!code) {
-      code = await userService.generateUniqueClientCode();
+      code = await userService.generateUniqueClientCode(db, branch);
     }
 
     const tgId = telegram_id?.trim()
@@ -507,7 +543,7 @@ export function createAdminApp(bot: Bot<Context>) {
       : BigInt(Date.now()) * -1n;
 
     try {
-      const newUser = await prisma.user.create({
+      const newUser = await db.user.create({
         data: {
           full_name: full_name.trim(),
           phone: cleanPhone,
@@ -527,7 +563,8 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── User detail / edit ─────────────────────────────────────────────────────
 
   app.get("/admin/users/:id", requireAuth, async (req, res) => {
-    const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) } });
+    const db = getPrisma(getBranch(req));
+    const user = await db.user.findUnique({ where: { id: Number(req.params.id) } });
     if (!user) return res.redirect("/admin/users");
 
     const saved     = req.query.saved === "1";
@@ -536,8 +573,8 @@ export function createAdminApp(bot: Bot<Context>) {
     const pkgSaved  = req.query.pkg_saved === "1";
 
     const [packages, tariffSetting] = await Promise.all([
-      prisma.package.findMany({ where: { user_id: user.id }, orderBy: { created_at: "desc" } }),
-      prisma.setting.findUnique({ where: { key: "tariff_per_kg" } }),
+      db.package.findMany({ where: { user_id: user.id }, orderBy: { created_at: "desc" } }),
+      db.setting.findUnique({ where: { key: "tariff_per_kg" } }),
     ]);
     const tariff = parseFloat(tariffSetting?.value ?? "0") || 0;
 
@@ -776,10 +813,11 @@ export function createAdminApp(bot: Bot<Context>) {
       </div>
       ${pkgSection}`;
 
-    res.send(layout(user.full_name, body, "/admin/users"));
+    res.send(layout(user.full_name, body, "/admin/users", req));
   });
 
   app.post("/admin/users/:id/packages/status", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const userId = Number(req.params.id);
     const { ids, status, weight, price } = req.body as Record<string, string | string[]>;
     const validStatuses = ["IN_TRANSIT", "IN_OFFICE", "DELIVERED"];
@@ -791,17 +829,17 @@ export function createAdminApp(bot: Bot<Context>) {
       if (weight) data.weight = parseFloat(weight as string);
       if (price)  data.price  = parseFloat(price  as string);
 
-      await prisma.package.updateMany({
+      await db.package.updateMany({
         where: { id: { in: idList }, user_id: userId },
         data:  data as { status: "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED"; weight?: number; price?: number },
       });
 
       if (status === "IN_OFFICE" || status === "DELIVERED") {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        const packages = await prisma.package.findMany({ where: { id: { in: idList } } });
+        const user = await db.user.findUnique({ where: { id: userId } });
+        const packages = await db.package.findMany({ where: { id: { in: idList } } });
         const w = weight ? parseFloat(weight as string) : null;
         const p = price  ? parseFloat(price  as string) : null;
-        await notifyStatusChange(bot, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
+        await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
       }
     }
     res.redirect(`/admin/users/${userId}?pkg_saved=1`);
@@ -810,10 +848,11 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── Update user ────────────────────────────────────────────────────────────
 
   app.post("/admin/users/:id", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const { client_code, full_name, phone } = req.body as Record<string, string>;
 
     try {
-      await prisma.user.update({
+      await db.user.update({
         where: { id: Number(req.params.id) },
         data: { client_code, full_name, phone },
       });
@@ -832,7 +871,8 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── Delete user ────────────────────────────────────────────────────────────
 
   app.post("/admin/users/:id/delete", requireAuth, async (req, res) => {
-    await prisma.user.delete({ where: { id: Number(req.params.id) } });
+    const db = getPrisma(getBranch(req));
+    await db.user.delete({ where: { id: Number(req.params.id) } });
     res.redirect("/admin/users");
   });
 
@@ -840,13 +880,14 @@ export function createAdminApp(bot: Bot<Context>) {
 
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-  app.get("/admin/packages/import", requireAuth, (_req, res) => {
+  app.get("/admin/packages/import", requireAuth, (req, res) => {
+    const codePrefix = clientCodePrefix(getBranch(req));
     const body = `
       <div class="row g-4">
         <div class="col-lg-6">
           <div class="card stat-card p-4">
             <p class="text-muted small mb-3">
-              Колонка <b>C</b> — код клиента. Форматы: <code>2222</code>, <code>DIX2222</code>, <code>DIX-2222</code>, <code>DIX 2222</code>.<br>
+              Колонка <b>C</b> — код клиента. Форматы: <code>2222</code>, <code>${codePrefix}2222</code>, <code>${codePrefix}-2222</code>, <code>${codePrefix} 2222</code>.<br>
               Колонка <b>D</b> — трек-номер.<br>
               Строки без распознанного кода в колонке C пропускаются.<br>
               Дата отправки извлекается из имени файла (формат: <code>4月18号…</code>).<br>
@@ -868,10 +909,13 @@ export function createAdminApp(bot: Bot<Context>) {
         </div>
       </div>`;
 
-    res.send(layout("Импорт посылок из Excel", body, "/admin/packages"));
+    res.send(layout("Импорт посылок из Excel", body, "/admin/packages", req));
   });
 
   app.post("/admin/packages/import", requireAuth, upload.single("file"), async (req, res) => {
+    const branch = getBranch(req);
+    const db = getPrisma(branch);
+    const codePrefix = clientCodePrefix(branch);
     if (!req.file) return res.redirect("/admin/packages/import");
 
     // multer decodes the filename as latin1; re-encode to get the original UTF-8
@@ -890,21 +934,21 @@ export function createAdminApp(bot: Bot<Context>) {
       const rawCode   = (row as unknown[])[2];
       const trackCode = String((row as unknown[])[3] ?? "").trim();
 
-      const clientCode = parseClientCode(rawCode);
+      const clientCode = parseClientCode(rawCode, codePrefix);
 
       // Skip rows without a recognisable DIX code in column C or empty track in column D
       if (!clientCode || !trackCode) continue;
 
-      const user = await prisma.user.findUnique({ where: { client_code: clientCode } });
+      const user = await db.user.findUnique({ where: { client_code: clientCode } });
       if (!user) { errors.push(`${clientCode}: пользователь не найден`); skipped++; continue; }
 
       // Skip if this track code already exists for this user (any status, including DELIVERED)
-      const exists = await prisma.package.findFirst({
+      const exists = await db.package.findFirst({
         where: { user_id: user.id, track_code: trackCode },
       });
       if (exists) { skipped++; continue; }
 
-      await prisma.package.create({
+      await db.package.create({
         data: {
           user_id:    user.id,
           track_code: trackCode,
@@ -921,13 +965,15 @@ export function createAdminApp(bot: Bot<Context>) {
     res.send(layout("Импорт посылок из Excel",
       `<div class="alert alert-success">${msg}</div>
        <a href="/admin/packages" class="btn btn-primary">К списку посылок</a>`,
-      "/admin/packages"
+      "/admin/packages",
+      req
     ));
   });
 
   // ── Packages export ───────────────────────────────────────────────────────
 
   app.get("/admin/packages/export", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const search   = ((req.query.search as string) ?? "").trim();
     const statusQ  = (req.query.status  as string) ?? "";
     const dateFrom = (req.query.date_from as string) ?? "";
@@ -950,7 +996,7 @@ export function createAdminApp(bot: Bot<Context>) {
       where.created_at = range;
     }
 
-    const packages = await prisma.package.findMany({
+    const packages = await db.package.findMany({
       where,
       include: { user: { select: { client_code: true, full_name: true } } },
       orderBy: { created_at: "desc" },
@@ -991,6 +1037,7 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── Packages list ─────────────────────────────────────────────────────────
 
   app.get("/admin/packages", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const PAGE_SIZE = 25;
     const page    = Math.max(1, parseInt(req.query.page as string) || 1);
     const search  = ((req.query.search as string) ?? "").trim();
@@ -1017,14 +1064,14 @@ export function createAdminApp(bot: Bot<Context>) {
     }
 
     const [packages, total] = await Promise.all([
-      prisma.package.findMany({
+      db.package.findMany({
         where,
         include: { user: { select: { client_code: true, full_name: true } } },
         orderBy: { created_at: "desc" },
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
       }),
-      prisma.package.count({ where }),
+      db.package.count({ where }),
     ]);
 
     const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -1045,8 +1092,8 @@ export function createAdminApp(bot: Bot<Context>) {
       return "?" + p.toString();
     };
 
-    const activeCount  = await prisma.package.count({ where: { status: { not: "DELIVERED" } } });
-    const archiveCount = await prisma.package.count({ where: { status: "DELIVERED" } });
+    const activeCount  = await db.package.count({ where: { status: { not: "DELIVERED" } } });
+    const archiveCount = await db.package.count({ where: { status: "DELIVERED" } });
 
     const tabs = `
       <ul class="nav nav-tabs mb-3">
@@ -1174,15 +1221,16 @@ export function createAdminApp(bot: Bot<Context>) {
         ${pagination}
       </div>`;
 
-    res.send(layout("Посылки", body, "/admin/packages"));
+    res.send(layout("Посылки", body, "/admin/packages", req));
   });
 
   // ── Package new ────────────────────────────────────────────────────────────
 
-  app.get("/admin/packages/new", requireAuth, async (_req, res) => {
-    const tariffSetting = await prisma.setting.findUnique({ where: { key: "tariff_per_kg" } });
+  app.get("/admin/packages/new", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const tariffSetting = await db.setting.findUnique({ where: { key: "tariff_per_kg" } });
     const tariff = parseFloat(tariffSetting?.value ?? "0") || 0;
-    const users = await prisma.user.findMany({
+    const users = await db.user.findMany({
       orderBy: { client_code: "asc" },
       select: { id: true, client_code: true, full_name: true },
     });
@@ -1249,13 +1297,14 @@ export function createAdminApp(bot: Bot<Context>) {
         </div>
       </div>`;
 
-    res.send(layout("Новая посылка", body, "/admin/packages"));
+    res.send(layout("Новая посылка", body, "/admin/packages", req));
   });
 
   app.post("/admin/packages/new", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const { user_id, track_code, status, weight, price } = req.body as Record<string, string>;
 
-    await prisma.package.create({
+    await db.package.create({
       data: {
         user_id:    Number(user_id),
         track_code: track_code.trim(),
@@ -1271,12 +1320,13 @@ export function createAdminApp(bot: Bot<Context>) {
   // ── Package detail / edit ──────────────────────────────────────────────────
 
   app.get("/admin/packages/:id", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const [pkg, tariffSetting] = await Promise.all([
-      prisma.package.findUnique({
+      db.package.findUnique({
         where: { id: Number(req.params.id) },
         include: { user: { select: { client_code: true, full_name: true } } },
       }),
-      prisma.setting.findUnique({ where: { key: "tariff_per_kg" } }),
+      db.setting.findUnique({ where: { key: "tariff_per_kg" } }),
     ]);
     if (!pkg) return res.redirect("/admin/packages");
 
@@ -1361,13 +1411,14 @@ export function createAdminApp(bot: Bot<Context>) {
         </div>
       </div>`;
 
-    res.send(layout(pkg.track_code, body, "/admin/packages"));
+    res.send(layout(pkg.track_code, body, "/admin/packages", req));
   });
 
   app.post("/admin/packages/:id", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const { track_code, status, weight, price } = req.body as Record<string, string>;
 
-    const pkg = await prisma.package.update({
+    const pkg = await db.package.update({
       where: { id: Number(req.params.id) },
       data: {
         track_code: track_code.trim(),
@@ -1379,21 +1430,23 @@ export function createAdminApp(bot: Bot<Context>) {
     });
 
     if (status === "IN_OFFICE" || status === "DELIVERED") {
-      await notifyStatusChange(bot, pkg.user_id, pkg.user.client_code, [pkg.track_code], status, pkg.weight, pkg.price);
+      await notifyStatusChange(bot, db, pkg.user_id, pkg.user.client_code, [pkg.track_code], status, pkg.weight, pkg.price);
     }
 
     res.redirect(`/admin/packages/${req.params.id}?saved=1`);
   });
 
   app.post("/admin/packages/:id/delete", requireAuth, async (req, res) => {
-    await prisma.package.delete({ where: { id: Number(req.params.id) } });
+    const db = getPrisma(getBranch(req));
+    await db.package.delete({ where: { id: Number(req.params.id) } });
     res.redirect("/admin/packages");
   });
 
   // ── Promo codes ────────────────────────────────────────────────────────────
 
-  app.get("/admin/promocodes", requireAuth, async (_req, res) => {
-    const promos = await prisma.promoCode.findMany({
+  app.get("/admin/promocodes", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const promos = await db.promoCode.findMany({
       orderBy: { created_at: "desc" },
       include: { claimer: { select: { client_code: true, full_name: true, id: true } } },
     });
@@ -1447,27 +1500,30 @@ export function createAdminApp(bot: Bot<Context>) {
         </div>
       </div>`;
 
-    res.send(layout("Промокоды", body, "/admin/promocodes"));
+    res.send(layout("Промокоды", body, "/admin/promocodes", req));
   });
 
   app.post("/admin/promocodes/new", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const { code, description } = req.body as Record<string, string>;
-    await prisma.promoCode.create({
+    await db.promoCode.create({
       data: { code: code.trim(), description: description?.trim() || null },
     });
     res.redirect("/admin/promocodes");
   });
 
   app.post("/admin/promocodes/:id/delete", requireAuth, async (req, res) => {
-    await prisma.promoCode.delete({ where: { id: Number(req.params.id) } });
+    const db = getPrisma(getBranch(req));
+    await db.promoCode.delete({ where: { id: Number(req.params.id) } });
     res.redirect("/admin/promocodes");
   });
 
   // ── Settings ───────────────────────────────────────────────────────────────
 
   app.get("/admin/settings", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const saved = req.query.saved === "1";
-    const settings = await prisma.setting.findMany({
+    const settings = await db.setting.findMany({
       where: { key: { in: ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url", "tariff_per_kg"] } },
     });
     const s: Record<string, string> = {};
@@ -1530,13 +1586,14 @@ export function createAdminApp(bot: Bot<Context>) {
         </div>
       </div>`;
 
-    res.send(layout("Настройки бота", body, "/admin/settings"));
+    res.send(layout("Настройки бота", body, "/admin/settings", req));
   });
 
-  app.get("/admin/db-dump", requireAuth, (_req, res) => {
-    const databaseUrl = process.env.DATABASE_URL;
+  app.get("/admin/db-dump", requireAuth, (req, res) => {
+    const branch = getBranch(req);
+    const databaseUrl = getDatabaseUrl(branch);
     if (!databaseUrl) {
-      res.status(500).send("DATABASE_URL не задан");
+      res.status(500).send(`База данных филиала "${branchLabel(branch)}" не настроена`);
       return;
     }
 
@@ -1557,7 +1614,7 @@ export function createAdminApp(bot: Bot<Context>) {
         res.status(500).send(`pg_dump завершился с ошибкой (код ${code}): ${stderr}`);
         return;
       }
-      const filename = `dump_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.sql`;
+      const filename = `dump_${branch}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.sql`;
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", "application/sql");
       res.send(Buffer.concat(chunks));
@@ -1565,11 +1622,12 @@ export function createAdminApp(bot: Bot<Context>) {
   });
 
   app.post("/admin/settings", requireAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const body = req.body as Record<string, string>;
     const keys = ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url", "tariff_per_kg"];
     for (const key of keys) {
       if (typeof body[key] === "string") {
-        await prisma.setting.upsert({
+        await db.setting.upsert({
           where:  { key },
           update: { value: body[key] },
           create: { key, value: body[key] },
@@ -1620,15 +1678,18 @@ export function createAdminApp(bot: Bot<Context>) {
         cb(null, UPLOADS_DIR);
       },
       filename: (req, file, cb) => {
+        const branch = getBranch(req as Request);
         const fieldname = file.fieldname; // e.g. "pinduoduo_photo" or "pinduoduo_video"
         const ext = path.extname(file.originalname).toLowerCase() || (file.mimetype.startsWith("video") ? ".mp4" : ".jpg");
-        // Delete any previous file for this field
-        const prefix = fieldname;
+        // Delete any previous file (including legacy un-prefixed) for this field/branch
+        const prefix = `${branch}_${fieldname}`;
         try {
-          const existing = fs.readdirSync(UPLOADS_DIR).filter(f => f.startsWith(prefix + "."));
+          const existing = fs.readdirSync(UPLOADS_DIR).filter(f =>
+            f.startsWith(prefix + ".") || (branch === DEFAULT_BRANCH && f.startsWith(fieldname + "."))
+          );
           for (const f of existing) fs.unlinkSync(path.join(UPLOADS_DIR, f));
         } catch {}
-        cb(null, `${fieldname}${ext}`);
+        cb(null, `${prefix}${ext}`);
       },
     }),
     limits: { fileSize: 50 * 1024 * 1024 },
@@ -1643,8 +1704,10 @@ export function createAdminApp(bot: Bot<Context>) {
   });
 
   app.get("/admin/marketplaces", requireAuth, async (req, res) => {
+    const branch = getBranch(req);
+    const db = getPrisma(branch);
     const saved = req.query.saved === "1";
-    const settings = await prisma.setting.findMany({
+    const settings = await db.setting.findMany({
       where: { key: { in: MARKETPLACE_KEYS.map(m => m.key) } },
     });
     const valueMap: Record<string, string> = {};
@@ -1653,7 +1716,9 @@ export function createAdminApp(bot: Bot<Context>) {
     let uploadedFiles: string[] = [];
     try { uploadedFiles = fs.readdirSync(UPLOADS_DIR); } catch {}
 
-    const hasFile = (prefix: string) => uploadedFiles.some(f => f.startsWith(prefix + "."));
+    const hasFile = (prefix: string) =>
+      uploadedFiles.some(f => f.startsWith(`${branch}_${prefix}.`)) ||
+      (branch === DEFAULT_BRANCH && uploadedFiles.some(f => f.startsWith(prefix + ".")));
 
     const fileZone = (fieldName: string, accept: string, icon: string, hasUploaded: boolean) => `
       <div class="file-drop-zone" id="zone-${fieldName}" onclick="document.getElementById('inp-${fieldName}').click()">
@@ -1768,14 +1833,15 @@ export function createAdminApp(bot: Bot<Context>) {
       </div>
       ${fileDropScript}`;
 
-    res.send(layout("Маркетплейсы", body, "/admin/marketplaces"));
+    res.send(layout("Маркетплейсы", body, "/admin/marketplaces", req));
   });
 
   app.post("/admin/marketplaces", requireAuth, marketplaceUpload.fields(marketplaceFields), async (req, res) => {
+    const db = getPrisma(getBranch(req));
     const body = req.body as Record<string, string>;
     for (const { key } of MARKETPLACE_KEYS) {
       if (typeof body[key] === "string") {
-        await prisma.setting.upsert({
+        await db.setting.upsert({
           where:  { key },
           update: { value: body[key] },
           create: { key, value: body[key] },

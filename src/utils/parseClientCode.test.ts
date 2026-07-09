@@ -38,4 +38,12 @@ describe("parseClientCode", () => {
     expect(parseClientCode("трек")).toBeNull();
     expect(parseClientCode("JT5485640575332")).toBeNull();
   });
+
+  it("supports a custom prefix (Кант — DIX2)", () => {
+    expect(parseClientCode("2222", "DIX2")).toBe("DIX2-2222");
+    expect(parseClientCode("DIX2-0022", "DIX2")).toBe("DIX2-0022");
+    expect(parseClientCode("DIX2 22", "DIX2")).toBe("DIX2-0022");
+    expect(parseClientCode("dix2-9999", "DIX2")).toBe("DIX2-9999");
+    expect(parseClientCode("DIX-2222", "DIX2")).toBeNull();
+  });
 });

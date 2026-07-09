@@ -1,13 +1,17 @@
-// Matches: "2222", "DIX2222", "DIX-2222", "DIX 2222" (case-insensitive)
-const DIX_RE = /^(?:DIX[-\s]?)?(\d{1,6})$/i;
+function buildDixRegex(prefix: string): RegExp {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Matches: "2222", "<PREFIX>2222", "<PREFIX>-2222", "<PREFIX> 2222" (case-insensitive)
+  return new RegExp(`^(?:${escaped}[-\\s]?)?(\\d{1,6})$`, "i");
+}
 
 /**
- * Parses a raw cell value from the Excel import and normalises it to "DIX-XXXX".
+ * Parses a raw cell value from the Excel import and normalises it to "<PREFIX>-XXXX".
+ * `prefix` selects the branch's code prefix (e.g. "DIX" for Бишкек, "DIX2" for Кант).
  * Returns null if the value doesn't look like a client code.
  */
-export function parseClientCode(raw: unknown): string | null {
+export function parseClientCode(raw: unknown, prefix: string = "DIX"): string | null {
   const s = String(raw ?? "").trim();
-  const m = DIX_RE.exec(s);
+  const m = buildDixRegex(prefix).exec(s);
   if (!m) return null;
-  return `DIX-${m[1].padStart(4, "0")}`;
+  return `${prefix}-${m[1].padStart(4, "0")}`;
 }

@@ -64,7 +64,9 @@ jobs:
             POSTGRES_USER=cargo_user
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_DB=cargo_bot_staging
+            POSTGRES_DB_KANT=cargo_bot_staging_kant
             DATABASE_URL=postgresql://cargo_user:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/cargo_bot_staging
+            DATABASE_URL_KANT=postgresql://cargo_user:${{ secrets.POSTGRES_PASSWORD }}@postgres_kant:5432/cargo_bot_staging_kant
             ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}
             ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
             ADMIN_COOKIE_SECRET=${{ secrets.ADMIN_COOKIE_SECRET }}
@@ -138,7 +140,9 @@ jobs:
             POSTGRES_USER=cargo_user
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_DB=cargo_bot_prod
+            POSTGRES_DB_KANT=cargo_bot_prod_kant
             DATABASE_URL=postgresql://cargo_user:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/cargo_bot_prod
+            DATABASE_URL_KANT=postgresql://cargo_user:${{ secrets.POSTGRES_PASSWORD }}@postgres_kant:5432/cargo_bot_prod_kant
             ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}
             ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
             ADMIN_COOKIE_SECRET=${{ secrets.ADMIN_COOKIE_SECRET }}
