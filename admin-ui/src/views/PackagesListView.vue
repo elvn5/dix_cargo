@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 pageTitle.value = "Посылки";
 
@@ -32,6 +33,7 @@ const total = ref(0);
 const totalPages = ref(1);
 const activeCount = ref(0);
 const archiveCount = ref(0);
+const loading = ref(true);
 
 function currentQuery() {
   const q: Record<string, string> = { tab: tab.value, page: String(page.value) };
@@ -52,6 +54,7 @@ async function load() {
   totalPages.value = data.totalPages;
   activeCount.value = data.activeCount;
   archiveCount.value = data.archiveCount;
+  loading.value = false;
 }
 
 function applyFilters() {
@@ -143,7 +146,10 @@ onMounted(load);
           <tr><th>Трек-код</th><th>Статус</th><th>DIX-код</th><th>Клиент</th><th>Дата</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-if="packages.length === 0">
+          <tr v-if="loading">
+            <td colspan="6"><LoadingSpinner compact label="" /></td>
+          </tr>
+          <tr v-else-if="packages.length === 0">
             <td colspan="6" class="text-center text-slate-400 py-8">Нет посылок</td>
           </tr>
           <tr v-for="p in packages" :key="p.id">

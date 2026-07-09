@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -186,7 +187,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <div v-if="loading" class="text-slate-400">Загрузка…</div>
+  <LoadingSpinner v-if="loading" />
   <template v-else>
     <div v-if="savedMsg" class="alert alert-success">Изменения сохранены.</div>
     <div v-if="editError" class="alert alert-danger">{{ editError }}</div>

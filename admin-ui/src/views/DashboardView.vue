@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 pageTitle.value = "Дашборд";
 
@@ -32,7 +33,7 @@ function fmtDate(s: string) {
 </script>
 
 <template>
-  <div v-if="loading" class="text-slate-400">Загрузка…</div>
+  <LoadingSpinner v-if="loading" />
   <template v-else-if="data">
     <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
       <div class="card p-4">

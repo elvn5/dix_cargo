@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 pageTitle.value = "Пользователи";
 
@@ -22,6 +23,7 @@ const total = ref(0);
 const pages = ref(1);
 const page = ref(Number(route.query.page) || 1);
 const q = ref((route.query.q as string) || "");
+const loading = ref(true);
 
 async function load() {
   const params = new URLSearchParams({ page: String(page.value), q: q.value });
@@ -29,6 +31,7 @@ async function load() {
   users.value = data.users;
   total.value = data.total;
   pages.value = data.pages;
+  loading.value = false;
 }
 
 function search() {
@@ -82,7 +85,10 @@ onMounted(load);
           <tr><th>КОД</th><th>ФИО</th><th>Телефон</th><th>Дата регистрации</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-if="users.length === 0">
+          <tr v-if="loading">
+            <td colspan="5"><LoadingSpinner compact label="" /></td>
+          </tr>
+          <tr v-else-if="users.length === 0">
             <td colspan="5" class="text-center text-slate-400 py-8">Нет пользователей</td>
           </tr>
           <tr v-for="u in users" :key="u.id">

@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
 import FileDropZone from "../components/FileDropZone.vue";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 pageTitle.value = "Маркетплейсы";
 
@@ -26,6 +27,7 @@ const sections = ref<Section[]>([]);
 const files = ref<Record<string, File>>({});
 const saved = ref(false);
 const submitting = ref(false);
+const loading = ref(true);
 
 async function load() {
   const data = await api.get<{ sections: { key: string; value: string; hasPhoto: boolean; hasVideo: boolean }[] }>(
@@ -35,6 +37,7 @@ async function load() {
     const found = data.sections.find((s) => s.key === m.key);
     return { ...m, value: found?.value ?? "", hasPhoto: found?.hasPhoto ?? false, hasVideo: found?.hasVideo ?? false };
   });
+  loading.value = false;
 }
 
 function onFileSelect(fieldName: string, file: File) {
@@ -61,7 +64,8 @@ onMounted(load);
 
 <template>
   <div v-if="saved" class="alert alert-success">Изменения сохранены.</div>
-  <div class="max-w-4xl">
+  <LoadingSpinner v-if="loading" />
+  <div v-else class="max-w-4xl">
     <div class="card p-6">
       <form @submit.prevent="save">
         <div v-for="s in sections" :key="s.key" class="mb-8 pb-6 border-b border-slate-100 last:border-0">
