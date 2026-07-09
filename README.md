@@ -41,6 +41,9 @@ npm run db:generate   # генерация Prisma-клиента
 npm run db:migrate    # применить миграции (dev)
 npm run db:push       # синхронизировать схему без миграций
 npm run db:studio     # открыть Prisma Studio
+
+npm test              # юнит-тесты (vitest)
+npm run test:coverage # тесты + отчёт покрытия (порог: 80% строк/statements/functions, 75% branches)
 ```
 
 ### Admin UI (Vue)
@@ -51,9 +54,11 @@ npm run db:studio     # открыть Prisma Studio
 ```bash
 cd admin-ui
 npm install
-npm run dev         # Vite dev-сервер на :5173 с проксированием /api на localhost:3000
-npm run build       # сборка в admin-ui/dist — подхватывается Express'ом при следующем запросе
-npm run typecheck   # vue-tsc
+npm run dev            # Vite dev-сервер на :5173 с проксированием /api на localhost:3000
+npm run build          # сборка в admin-ui/dist — подхватывается Express'ом при следующем запросе
+npm run typecheck      # vue-tsc
+npm test               # юнит-тесты (vitest + @vue/test-utils)
+npm run test:coverage  # тесты + отчёт покрытия
 ```
 
 Для прод-сборки Docker-образа `admin-ui` собирается автоматически на отдельном этапе (см. `Dockerfile`).

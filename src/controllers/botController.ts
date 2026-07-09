@@ -61,6 +61,11 @@ type RegStep =
 
 const regState = new Map<number, RegStep>();
 
+/** Test-only: clears in-progress registration state between test cases. */
+export function __resetRegStateForTests(): void {
+  regState.clear();
+}
+
 function branchSelectKeyboard() {
   return {
     inline_keyboard: [[
