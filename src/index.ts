@@ -2,7 +2,7 @@ import "dotenv/config";
 import { Bot } from "grammy";
 import { registerControllers } from "./controllers/botController";
 import { createAdminApp } from "./admin/server";
-import prisma from "./database/prismaClient";
+import { connectAllBranches, disconnectAllBranches } from "./database/prismaClient";
 
 // ─── Валидация переменных окружения ───────────────────────────────────────────
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -25,8 +25,8 @@ bot.catch((err) => {
 
 // ─── Запуск ───────────────────────────────────────────────────────────────────
 async function main() {
-  await prisma.$connect();
-  console.log("✅ Соединение с базой данных установлено.");
+  await connectAllBranches();
+  console.log("✅ Соединение с базами данных всех филиалов установлено.");
 
   const { app, port } = createAdminApp(bot);
   app.listen(port, () => console.log(`🖥️  Админ-панель: http://localhost:${port}/admin`));
@@ -52,8 +52,8 @@ async function main() {
 async function shutdown() {
   console.log("⏹️  Завершение работы...");
   await bot.stop();
-  await prisma.$disconnect();
-  console.log("✅ Бот остановлен, соединение с БД закрыто.");
+  await disconnectAllBranches();
+  console.log("✅ Бот остановлен, соединения с БД закрыты.");
   process.exit(0);
 }
 

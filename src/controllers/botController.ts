@@ -1,6 +1,7 @@
 import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
-import prisma from "../database/prismaClient";
+import { getPrisma, DEFAULT_BRANCH, branchLabel, type Branch } from "../database/prismaClient";
+import type { PrismaClient } from "@prisma/client";
 import path from "path";
 import fs from "fs";
 
@@ -27,19 +28,24 @@ const MARKETPLACE_DEFAULTS: Record<string, string> = {
     `Только после подтверждения адреса, Карго несет ответственность за ваши посылки.`,
 };
 
-async function getMarketplaceText(settingKey: string, code: string): Promise<string> {
-  const setting = await prisma.setting.findUnique({ where: { key: settingKey } });
+async function getMarketplaceText(db: PrismaClient, settingKey: string, code: string): Promise<string> {
+  const setting = await db.setting.findUnique({ where: { key: settingKey } });
   const template = setting?.value ?? MARKETPLACE_DEFAULTS[settingKey] ?? "";
   return template.replace(/\{code\}/g, code);
 }
 
-function resolveMarketplaceFile(settingKey: string, type: "photo" | "video"): string {
+function resolveMarketplaceFile(branch: Branch, settingKey: string, type: "photo" | "video"): string {
   const name = settingKey.replace("marketplace_", "");
   const uploadsDir = "/app/uploads";
   try {
     const files = fs.readdirSync(uploadsDir);
-    const found = files.find(f => f.startsWith(`${name}_${type}.`));
-    if (found) return path.join(uploadsDir, found);
+    const branchFile = files.find(f => f.startsWith(`${branch}_${name}_${type}.`));
+    if (branchFile) return path.join(uploadsDir, branchFile);
+    if (branch === DEFAULT_BRANCH) {
+      // Обратная совместимость: файлы, загруженные до поддержки филиалов, без префикса
+      const legacyFile = files.find(f => f.startsWith(`${name}_${type}.`));
+      if (legacyFile) return path.join(uploadsDir, legacyFile);
+    }
   } catch {}
   // fallback to bundled asset
   return type === "photo"
@@ -48,14 +54,24 @@ function resolveMarketplaceFile(settingKey: string, type: "photo" | "video"): st
 }
 
 type RegStep =
-  | { step: "phone" }
-  | { step: "name"; phone: string }
-  | { step: "track_search" };
+  | { step: "select_branch" }
+  | { step: "phone"; branch: Branch }
+  | { step: "name"; phone: string; branch: Branch }
+  | { step: "track_search"; branch: Branch };
 
 const regState = new Map<number, RegStep>();
 
-async function getMenuKeyboard() {
-  const hasPromo = await prisma.promoCode.findFirst({ where: { claimed_by: null } });
+function branchSelectKeyboard() {
+  return {
+    inline_keyboard: [[
+      { text: "🏙 г. Бишкек", callback_data: "branch_bishkek" },
+      { text: "🏙 г. Кант", callback_data: "branch_kant" },
+    ]],
+  };
+}
+
+async function getMenuKeyboard(db: PrismaClient) {
+  const hasPromo = await db.promoCode.findFirst({ where: { claimed_by: null } });
   const rows: { text: string }[][] = [
     [{ text: "📦 Мои посылки" }, { text: "🚫 Запрещенные товары" }],
     [{ text: "📍 Адреса" }, { text: "👤 Профиль" }],
@@ -65,8 +81,8 @@ async function getMenuKeyboard() {
   return { keyboard: rows, resize_keyboard: true, persistent: true };
 }
 
-async function getManagersKeyboard() {
-  const settings = await prisma.setting.findMany({
+async function getManagersKeyboard(db: PrismaClient) {
+  const settings = await db.setting.findMany({
     where: { key: { in: ["manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"] } },
   });
   const s: Record<string, string> = {};
@@ -80,8 +96,18 @@ async function getManagersKeyboard() {
   };
 }
 
-async function sendRegistrationAddress(ctx: Context, code: string): Promise<void> {
-  const text = await getMarketplaceText("marketplace_pinduoduo", code);
+/** Определяет базу филиала для текущего пользователя; если он ещё не зарегистрирован — база филиала по умолчанию. */
+async function resolveDbForCtx(ctx: Context): Promise<PrismaClient> {
+  const telegramId = ctx.from?.id;
+  if (telegramId) {
+    const found = await userService.findUserAnyBranch(BigInt(telegramId));
+    if (found) return getPrisma(found.branch);
+  }
+  return getPrisma(DEFAULT_BRANCH);
+}
+
+async function sendRegistrationAddress(ctx: Context, db: PrismaClient, code: string): Promise<void> {
+  const text = await getMarketplaceText(db, "marketplace_pinduoduo", code);
   const fullText = `Ваш адрес:\n\n${text}`;
 
   const codeEnd = fullText.indexOf("</code>");
@@ -112,29 +138,45 @@ export function registerControllers(bot: Bot<Context>): void {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
-    const existingUser = await userService.findUserByTelegramId(
-      BigInt(telegramId)
-    );
+    const existing = await userService.findUserAnyBranch(BigInt(telegramId));
 
-    if (existingUser) {
+    if (existing) {
+      const db = getPrisma(existing.branch);
       await ctx.reply(
         buildProfile(
-          existingUser.client_code,
-          existingUser.full_name,
-          existingUser.phone
+          existing.user.client_code,
+          existing.user.full_name,
+          existing.user.phone
         ),
         {
           parse_mode: "HTML",
-          reply_markup: await getMenuKeyboard(),
+          reply_markup: await getMenuKeyboard(db),
         }
       );
       return;
     }
 
-    regState.set(telegramId, { step: "phone" });
+    regState.set(telegramId, { step: "select_branch" });
 
     await ctx.reply(
-      "👋 Добро пожаловать!\n\n" +
+      "👋 Добро пожаловать!\n\nВыберите ваш филиал для регистрации:",
+      {
+        reply_markup: branchSelectKeyboard(),
+      }
+    );
+  });
+
+  // ── Выбор филиала ─────────────────────────────────────────────────────────────
+  bot.callbackQuery(/^branch_(bishkek|kant)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const branch = ctx.match[1] as Branch;
+    regState.set(telegramId, { step: "phone", branch });
+
+    await ctx.reply(
+      `✅ Филиал: <b>${branchLabel(branch)}</b>\n\n` +
         "Для регистрации укажите номер телефона в формате <b>XXX123456</b>\n" +
         "где XXX — код оператора\n" +
         "  Пример: <code>500100500</code>",
@@ -233,12 +275,12 @@ export function registerControllers(bot: Bot<Context>): void {
       await ctx.answerCallbackQuery();
 
       const telegramId = ctx.from?.id;
-      const user = telegramId
-        ? await userService.findUserByTelegramId(BigInt(telegramId))
-        : null;
-      const code = user?.client_code ?? "????";
+      const found = telegramId ? await userService.findUserAnyBranch(BigInt(telegramId)) : null;
+      const branch = found?.branch ?? DEFAULT_BRANCH;
+      const db = getPrisma(branch);
+      const code = found?.user.client_code ?? "????";
 
-      const text = await getMarketplaceText(settingKey, code);
+      const text = await getMarketplaceText(db, settingKey, code);
 
       // Send the address block (<code>…</code>) as a separate message for easy copying,
       // then send the rest of the instructions as a second message.
@@ -252,11 +294,11 @@ export function registerControllers(bot: Bot<Context>): void {
         await ctx.reply(text, { parse_mode: "HTML" });
       }
 
-      await ctx.replyWithPhoto(new InputFile(resolveMarketplaceFile(settingKey, "photo")));
-      await ctx.replyWithVideo(new InputFile(resolveMarketplaceFile(settingKey, "video")));
+      await ctx.replyWithPhoto(new InputFile(resolveMarketplaceFile(branch, settingKey, "photo")));
+      await ctx.replyWithVideo(new InputFile(resolveMarketplaceFile(branch, settingKey, "video")));
 
       await ctx.reply("📩 Готово? Отправьте скриншот на проверку:", {
-        reply_markup: await getManagersKeyboard(),
+        reply_markup: await getManagersKeyboard(db),
       });
     });
   }
@@ -272,11 +314,12 @@ export function registerControllers(bot: Bot<Context>): void {
 
   async function showPackagesPage(
     ctx: Context,
+    db: PrismaClient,
     userId: number,
     status: "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
     page: number
   ) {
-    const total = await prisma.package.count({ where: { user_id: userId, status } });
+    const total = await db.package.count({ where: { user_id: userId, status } });
 
     if (total === 0) {
       await ctx.reply(`${STATUS_LABEL[status]}: посылок нет.`);
@@ -286,7 +329,7 @@ export function registerControllers(bot: Bot<Context>): void {
     const totalPages = Math.ceil(total / PKG_PAGE_SIZE);
     const safePage = Math.max(0, Math.min(page, totalPages - 1));
 
-    const packages = await prisma.package.findMany({
+    const packages = await db.package.findMany({
       where: { user_id: userId, status },
       orderBy: { created_at: "desc" },
       skip: safePage * PKG_PAGE_SIZE,
@@ -316,20 +359,20 @@ export function registerControllers(bot: Bot<Context>): void {
   bot.callbackQuery(/^pkg_filter:(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from?.id;
-    const user = telegramId ? await userService.findUserByTelegramId(BigInt(telegramId)) : null;
-    if (!user) { await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start."); return; }
+    const found = telegramId ? await userService.findUserAnyBranch(BigInt(telegramId)) : null;
+    if (!found) { await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start."); return; }
     const status = ctx.match[1] as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
-    await showPackagesPage(ctx, user.id, status, 0);
+    await showPackagesPage(ctx, getPrisma(found.branch), found.user.id, status, 0);
   });
 
   bot.callbackQuery(/^pkg_page:(\w+):(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from?.id;
-    const user = telegramId ? await userService.findUserByTelegramId(BigInt(telegramId)) : null;
-    if (!user) { await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start."); return; }
+    const found = telegramId ? await userService.findUserAnyBranch(BigInt(telegramId)) : null;
+    if (!found) { await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start."); return; }
     const status = ctx.match[1] as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
     const page = parseInt(ctx.match[2], 10);
-    await showPackagesPage(ctx, user.id, status, page);
+    await showPackagesPage(ctx, getPrisma(found.branch), found.user.id, status, page);
   });
 
   // ── Поиск по трек-номеру ─────────────────────────────────────────────────────
@@ -337,7 +380,9 @@ export function registerControllers(bot: Bot<Context>): void {
     await ctx.answerCallbackQuery();
     const senderId = ctx.from?.id;
     if (!senderId) return;
-    regState.set(senderId, { step: "track_search" });
+    const found = await userService.findUserAnyBranch(BigInt(senderId));
+    if (!found) { await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start."); return; }
+    regState.set(senderId, { step: "track_search", branch: found.branch });
     await ctx.reply("🔍 Введите трек-номер посылки:");
   });
 
@@ -364,7 +409,7 @@ export function registerControllers(bot: Bot<Context>): void {
       return;
     }
 
-    regState.set(senderId, { step: "name", phone: contact.phone_number });
+    regState.set(senderId, { step: "name", phone: contact.phone_number, branch: state.branch });
 
     await ctx.reply("📝 Введите ваше ФИО (Фамилия Имя Отчество):", {
       reply_markup: { remove_keyboard: true },
@@ -405,23 +450,25 @@ export function registerControllers(bot: Bot<Context>): void {
     }
 
     if (text === "🎁 Получить промокод") {
-      const user = await userService.findUserByTelegramId(BigInt(senderId));
-      if (!user) {
+      const found = await userService.findUserAnyBranch(BigInt(senderId));
+      if (!found) {
         await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
         return;
       }
+      const db = getPrisma(found.branch);
+      const user = found.user;
 
       // Атомарно: берём первый свободный код и сразу привязываем к пользователю
-      const promo = await prisma.promoCode.findFirst({ where: { claimed_by: null } });
+      const promo = await db.promoCode.findFirst({ where: { claimed_by: null } });
       if (!promo) {
         await ctx.reply(
           "😔 К сожалению, все промокоды уже разобраны.",
-          { reply_markup: await getMenuKeyboard() }
+          { reply_markup: await getMenuKeyboard(db) }
         );
         return;
       }
 
-      const claimed = await prisma.promoCode.updateMany({
+      const claimed = await db.promoCode.updateMany({
         where: { id: promo.id, claimed_by: null },
         data:  { claimed_by: user.id, claimed_at: new Date() },
       });
@@ -430,7 +477,7 @@ export function registerControllers(bot: Bot<Context>): void {
         // Кто-то успел раньше (race condition)
         await ctx.reply(
           "😔 К сожалению, промокод уже был получен другим клиентом.",
-          { reply_markup: await getMenuKeyboard() }
+          { reply_markup: await getMenuKeyboard(db) }
         );
         return;
       }
@@ -438,7 +485,7 @@ export function registerControllers(bot: Bot<Context>): void {
       const desc = promo.description ? `\n\n${promo.description}` : "";
       await ctx.reply(
         `🎉 Ваш промокод: <code>${promo.code}</code>${desc}`,
-        { parse_mode: "HTML", reply_markup: await getMenuKeyboard() }
+        { parse_mode: "HTML", reply_markup: await getMenuKeyboard(db) }
       );
       return;
     }
@@ -447,14 +494,15 @@ export function registerControllers(bot: Bot<Context>): void {
     const state = regState.get(senderId);
     if (!state) {
       // Зарегистрированный пользователь без активного состояния — ищем по трек-номеру
-      const user = await userService.findUserByTelegramId(BigInt(senderId));
-      if (!user) {
+      const found = await userService.findUserAnyBranch(BigInt(senderId));
+      if (!found) {
         await ctx.reply("Отправьте /start для начала работы.");
         return;
       }
+      const db = getPrisma(found.branch);
 
-      const pkg = await prisma.package.findFirst({
-        where: { user_id: user.id, track_code: text },
+      const pkg = await db.package.findFirst({
+        where: { user_id: found.user.id, track_code: text },
       });
 
       if (!pkg) {
@@ -472,17 +520,25 @@ export function registerControllers(bot: Bot<Context>): void {
       return;
     }
 
+    if (state.step === "select_branch") {
+      await ctx.reply("👆 Пожалуйста, выберите филиал, нажав на одну из кнопок выше.", {
+        reply_markup: branchSelectKeyboard(),
+      });
+      return;
+    }
+
     if (state.step === "track_search") {
       regState.delete(senderId);
+      const db = getPrisma(state.branch);
 
-      const user = await userService.findUserByTelegramId(BigInt(senderId));
-      if (!user) {
+      const found = await userService.findUserAnyBranch(BigInt(senderId));
+      if (!found) {
         await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
         return;
       }
 
-      const pkg = await prisma.package.findFirst({
-        where: { user_id: user.id, track_code: text },
+      const pkg = await db.package.findFirst({
+        where: { user_id: found.user.id, track_code: text },
       });
 
       if (!pkg) {
@@ -511,14 +567,15 @@ export function registerControllers(bot: Bot<Context>): void {
         return;
       }
 
-      const phoneUser = await userService.findUserByPhone(text);
+      const db = getPrisma(state.branch);
+      const phoneUser = await userService.findUserByPhone(db, text);
       if (phoneUser) {
         if (phoneUser.telegram_id > 0n) {
           // Уже привязан к реальному Telegram-аккаунту
           if (phoneUser.telegram_id === BigInt(senderId)) {
             regState.delete(senderId);
             await ctx.reply(buildProfile(phoneUser.client_code, phoneUser.full_name, phoneUser.phone),
-              { parse_mode: "HTML", reply_markup: await getMenuKeyboard() });
+              { parse_mode: "HTML", reply_markup: await getMenuKeyboard(db) });
           } else {
             await ctx.reply(
               "❌ Этот номер телефона уже зарегистрирован.\n\nВведите другой номер или обратитесь к менеджеру.",
@@ -529,18 +586,18 @@ export function registerControllers(bot: Bot<Context>): void {
         }
         // Создан администратором — привязываем Telegram
         regState.delete(senderId);
-        const linked = await prisma.user.update({
+        const linked = await db.user.update({
           where: { id: phoneUser.id },
           data: { telegram_id: BigInt(senderId) },
         });
         await ctx.reply(buildProfile(linked.client_code, linked.full_name, linked.phone),
-          { parse_mode: "HTML", reply_markup: await getManagersKeyboard() });
-        await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard() });
+          { parse_mode: "HTML", reply_markup: await getManagersKeyboard(db) });
+        await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard(db) });
         return;
       }
 
       // Новый пользователь — переходим к вводу имени
-      regState.set(senderId, { step: "name", phone: text });
+      regState.set(senderId, { step: "name", phone: text, branch: state.branch });
       await ctx.reply("📝 Введите ваше ФИО (Фамилия Имя Отчество):", {
         reply_markup: { remove_keyboard: true },
       });
@@ -556,9 +613,11 @@ export function registerControllers(bot: Bot<Context>): void {
       }
 
       regState.delete(senderId);
+      const db = getPrisma(state.branch);
 
       try {
         const existingUser = await userService.findUserByTelegramId(
+          db,
           BigInt(senderId)
         );
 
@@ -569,19 +628,19 @@ export function registerControllers(bot: Bot<Context>): void {
               existingUser.full_name,
               existingUser.phone
             ),
-            { parse_mode: "HTML", reply_markup: await getMenuKeyboard() }
+            { parse_mode: "HTML", reply_markup: await getMenuKeyboard(db) }
           );
           return;
         }
 
-        const newUser = await userService.createUser(BigInt(senderId), state.phone, text);
+        const newUser = await userService.createUser(db, state.branch, BigInt(senderId), state.phone, text);
 
         await ctx.reply(
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
-          { parse_mode: "HTML", reply_markup: await getManagersKeyboard() }
+          { parse_mode: "HTML", reply_markup: await getManagersKeyboard(db) }
         );
-        await sendRegistrationAddress(ctx, newUser.client_code);
-        await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard() });
+        await sendRegistrationAddress(ctx, db, newUser.client_code);
+        await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard(db) });
       } catch (error) {
         console.error("[Registration] Ошибка при создании пользователя:", error);
         await ctx.reply("⚠️ Произошла ошибка при регистрации. Попробуйте позже.");
@@ -611,12 +670,13 @@ async function handlePackages(ctx: Context) {
 }
 
 async function handleForbidden(ctx: Context) {
-  const setting = await prisma.setting.findUnique({ where: { key: "forbidden_items" } });
+  const db = await resolveDbForCtx(ctx);
+  const setting = await db.setting.findUnique({ where: { key: "forbidden_items" } });
   const text = setting?.value ?? "⚠️ Информация временно недоступна.";
 
   await ctx.reply(text, {
     parse_mode: "HTML",
-    reply_markup: await getManagersKeyboard(),
+    reply_markup: await getManagersKeyboard(db),
   });
 }
 
@@ -649,13 +709,14 @@ async function handleProfile(ctx: Context) {
   const telegramId = ctx.from?.id;
   if (!telegramId) return;
 
-  const user = await userService.findUserByTelegramId(BigInt(telegramId));
+  const found = await userService.findUserAnyBranch(BigInt(telegramId));
 
-  if (!user) {
+  if (!found) {
     await ctx.reply("❌ Вы не зарегистрированы. Отправьте /start.");
     return;
   }
 
+  const user = found.user;
   await ctx.reply(
     `📃 <b>Ваш профиль</b>\n\n` +
       `🪪 Персональный КОД: <b>${user.client_code}</b>\n` +
@@ -666,7 +727,8 @@ async function handleProfile(ctx: Context) {
 }
 
 async function handleSupport(ctx: Context) {
-  const managersKb = await getManagersKeyboard();
+  const db = await resolveDbForCtx(ctx);
+  const managersKb = await getManagersKeyboard(db);
   await ctx.reply(
     "💬 <b>Поддержка</b>\n\nСвяжитесь с нами любым удобным способом:\n\n" +
       "📍 Адрес: Бишкек, Айбек-Ата 1/2\n" +
