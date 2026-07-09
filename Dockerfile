@@ -1,4 +1,17 @@
 # ──────────────────────────────────────────────
+# Stage: admin-ui (Vue SPA)
+# ──────────────────────────────────────────────
+FROM node:22-alpine AS admin-ui-builder
+
+WORKDIR /app/admin-ui
+
+COPY admin-ui/package*.json ./
+RUN npm install
+
+COPY admin-ui ./
+RUN npm run build
+
+# ──────────────────────────────────────────────
 # Stage 0: Development (hot reload)
 # ──────────────────────────────────────────────
 FROM node:22-alpine AS development
@@ -16,6 +29,7 @@ RUN npm install
 RUN npx prisma generate
 
 COPY tsconfig.json ./
+COPY --from=admin-ui-builder /app/admin-ui/dist ./admin-ui/dist
 
 COPY docker-entrypoint.dev.sh ./
 RUN chmod +x docker-entrypoint.dev.sh
@@ -75,6 +89,9 @@ COPY --from=builder /app/dist ./dist
 
 # Копируем статические файлы (фото, видео для бота)
 COPY src/assets ./dist/assets
+
+# Копируем собранный Vue admin-ui (раздаётся Express'ом под /admin)
+COPY --from=admin-ui-builder /app/admin-ui/dist ./admin-ui/dist
 
 # Скрипт запуска: сначала мигрируем, потом стартуем бота
 COPY docker-entrypoint.sh ./

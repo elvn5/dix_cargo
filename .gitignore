@@ -5,3 +5,4 @@ dist/
 pinduoduo/
 .claude/worktrees/
 .claude/projects/
+*.tsbuildinfo

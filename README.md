@@ -5,7 +5,8 @@ Telegram-бот для карго-компании на базе [grammY](https:
 ## Стек
 
 - **Bot:** grammY
-- **Backend:** Node.js + TypeScript + Express
+- **Backend:** Node.js + TypeScript + Express (REST API под `/api/admin`)
+- **Admin UI:** Vue 3 + Vite + Tailwind CSS v4 (SPA, раздаётся Express'ом под `/admin`)
 - **Database:** PostgreSQL + Prisma ORM
 - **Container:** Docker + Docker Compose
 - **CI/CD:** GitHub Actions
@@ -41,6 +42,21 @@ npm run db:migrate    # применить миграции (dev)
 npm run db:push       # синхронизировать схему без миграций
 npm run db:studio     # открыть Prisma Studio
 ```
+
+### Admin UI (Vue)
+
+Панель администратора — отдельный проект в `admin-ui/` (Vue 3 + Vite + Tailwind CSS v4). Backend раздаёт
+уже собранный `admin-ui/dist` под `/admin` и обслуживает JSON API под `/api/admin`.
+
+```bash
+cd admin-ui
+npm install
+npm run dev         # Vite dev-сервер на :5173 с проксированием /api на localhost:3000
+npm run build       # сборка в admin-ui/dist — подхватывается Express'ом при следующем запросе
+npm run typecheck   # vue-tsc
+```
+
+Для прод-сборки Docker-образа `admin-ui` собирается автоматически на отдельном этапе (см. `Dockerfile`).
 
 ### Переменные окружения
 
