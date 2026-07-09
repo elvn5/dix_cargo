@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -81,7 +82,7 @@ onMounted(load);
 </script>
 
 <template>
-  <div v-if="loading" class="text-slate-400">Загрузка…</div>
+  <LoadingSpinner v-if="loading" />
   <template v-else-if="pkg">
     <div v-if="saved" class="alert alert-success">Изменения сохранены.</div>
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">

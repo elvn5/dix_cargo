@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 pageTitle.value = "Настройки бота";
 
@@ -13,12 +14,14 @@ const form = reactive({
 const managers = ref<{ name: string; url: string }[]>([]);
 const saved = ref(false);
 const submitting = ref(false);
+const loading = ref(true);
 
 async function load() {
   const data = await api.get<{ settings: Record<string, string>; managers: { name: string; url: string }[] }>("/admin/settings");
   form.tariff_per_kg = data.settings.tariff_per_kg ?? "";
   form.forbidden_items = data.settings.forbidden_items ?? "";
   managers.value = data.managers.length ? data.managers.map(m => ({ ...m })) : [{ name: "", url: "" }];
+  loading.value = false;
 }
 
 function addManager() {
@@ -44,7 +47,8 @@ onMounted(load);
 
 <template>
   <div v-if="saved" class="alert alert-success">Изменения сохранены.</div>
-  <div class="max-w-3xl space-y-4">
+  <LoadingSpinner v-if="loading" />
+  <div v-else class="max-w-3xl space-y-4">
     <div class="card p-6">
       <form class="space-y-6" @submit.prevent="save">
         <div>

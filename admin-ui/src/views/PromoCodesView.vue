@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 pageTitle.value = "Промокоды";
 
@@ -17,10 +18,12 @@ const promos = ref<Promo[]>([]);
 const code = ref("");
 const description = ref("");
 const submitting = ref(false);
+const loading = ref(true);
 
 async function load() {
   const data = await api.get<{ promos: Promo[] }>("/admin/promocodes");
   promos.value = data.promos;
+  loading.value = false;
 }
 
 async function create() {
@@ -76,7 +79,10 @@ onMounted(load);
               <tr><th>Код</th><th>Описание</th><th>Статус / Клиент</th><th>Получен</th><th></th></tr>
             </thead>
             <tbody>
-              <tr v-if="promos.length === 0">
+              <tr v-if="loading">
+                <td colspan="5"><LoadingSpinner compact label="" /></td>
+              </tr>
+              <tr v-else-if="promos.length === 0">
                 <td colspan="5" class="text-center text-slate-400 py-8">Промокодов нет</td>
               </tr>
               <tr v-for="p in promos" :key="p.id">
