@@ -86,19 +86,45 @@ async function getMenuKeyboard(db: PrismaClient) {
   return { keyboard: rows, resize_keyboard: true, persistent: true };
 }
 
-async function getManagersKeyboard(db: PrismaClient) {
-  const settings = await db.setting.findMany({
-    where: { key: { in: ["manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"] } },
-  });
-  const s: Record<string, string> = {};
-  for (const row of settings) s[row.key] = row.value;
+const DEFAULT_MANAGERS = [
+  { name: "Лидия", url: "https://wa.me/996550867414" },
+  { name: "Виктория", url: "https://wa.me/996556969906" },
+];
 
-  return {
-    inline_keyboard: [[
-      { text: s.manager_1_name || "Лидия",    url: s.manager_1_url || "https://wa.me/996550867414" },
-      { text: s.manager_2_name || "Виктория", url: s.manager_2_url || "https://wa.me/996556969906" },
-    ]],
-  };
+async function getManagersKeyboard(db: PrismaClient) {
+  let managers: { name: string; url: string }[] = [];
+
+  const row = await db.setting.findUnique({ where: { key: "manager_buttons" } });
+  if (row) {
+    try {
+      const parsed = JSON.parse(row.value);
+      if (Array.isArray(parsed)) managers = parsed;
+    } catch {
+      // игнорируем повреждённое значение
+    }
+  }
+
+  if (managers.length === 0) {
+    const legacy = await db.setting.findMany({
+      where: { key: { in: ["manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"] } },
+    });
+    if (legacy.length > 0) {
+      const s: Record<string, string> = {};
+      for (const legacyRow of legacy) s[legacyRow.key] = legacyRow.value;
+      managers = [
+        { name: s.manager_1_name || DEFAULT_MANAGERS[0].name, url: s.manager_1_url || DEFAULT_MANAGERS[0].url },
+        { name: s.manager_2_name || DEFAULT_MANAGERS[1].name, url: s.manager_2_url || DEFAULT_MANAGERS[1].url },
+      ];
+    } else {
+      managers = DEFAULT_MANAGERS;
+    }
+  }
+
+  const rows: { text: string; url: string }[][] = [];
+  for (let i = 0; i < managers.length; i += 2) {
+    rows.push(managers.slice(i, i + 2).map(m => ({ text: m.name, url: m.url })));
+  }
+  return { inline_keyboard: rows };
 }
 
 /** Определяет базу филиала для текущего пользователя; если он ещё не зарегистрирован — база филиала по умолчанию. */

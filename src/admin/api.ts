@@ -446,23 +446,60 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
   // ── Настройки ──────────────────────────────────────────────────────────────
 
-  const SETTINGS_KEYS = ["forbidden_items", "manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url", "tariff_per_kg"];
+  const SETTINGS_KEYS = ["forbidden_items", "tariff_per_kg"];
+  const LEGACY_MANAGER_KEYS = ["manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"];
+  const DEFAULT_MANAGERS = [
+    { name: "Лидия", url: "https://wa.me/996550867414" },
+    { name: "Виктория", url: "https://wa.me/996556969906" },
+  ];
+
+  async function loadManagers(db: ReturnType<typeof getPrisma>): Promise<{ name: string; url: string }[]> {
+    const row = await db.setting.findUnique({ where: { key: "manager_buttons" } });
+    if (row) {
+      try {
+        const parsed = JSON.parse(row.value);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // игнорируем повреждённое значение
+      }
+    }
+
+    const legacy = await db.setting.findMany({ where: { key: { in: LEGACY_MANAGER_KEYS } } });
+    if (legacy.length === 0) return DEFAULT_MANAGERS;
+    const l: Record<string, string> = {};
+    for (const row of legacy) l[row.key] = row.value;
+    return [
+      { name: l.manager_1_name || DEFAULT_MANAGERS[0].name, url: l.manager_1_url || DEFAULT_MANAGERS[0].url },
+      { name: l.manager_2_name || DEFAULT_MANAGERS[1].name, url: l.manager_2_url || DEFAULT_MANAGERS[1].url },
+    ];
+  }
 
   api.get("/settings", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const settings = await db.setting.findMany({ where: { key: { in: SETTINGS_KEYS } } });
     const s: Record<string, string> = {};
     for (const row of settings) s[row.key] = row.value;
-    res.json({ settings: s });
+    const managers = await loadManagers(db);
+    res.json({ settings: s, managers });
   });
 
   api.put("/settings", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
-    const body = req.body as Record<string, string>;
+    const body = req.body as Record<string, unknown>;
     for (const key of SETTINGS_KEYS) {
       if (typeof body[key] === "string") {
-        await db.setting.upsert({ where: { key }, update: { value: body[key] }, create: { key, value: body[key] } });
+        await db.setting.upsert({ where: { key }, update: { value: body[key] }, create: { key, value: body[key] as string } });
       }
+    }
+    if (Array.isArray(body.managers)) {
+      const managers = (body.managers as { name?: unknown; url?: unknown }[])
+        .map(m => ({ name: String(m.name ?? "").trim(), url: String(m.url ?? "").trim() }))
+        .filter(m => m.name && m.url);
+      await db.setting.upsert({
+        where: { key: "manager_buttons" },
+        update: { value: JSON.stringify(managers) },
+        create: { key: "manager_buttons", value: JSON.stringify(managers) },
+      });
     }
     res.json({ ok: true });
   });
