@@ -1,0 +1,44 @@
+# 2026-07-09 — feat/admin-vue-migration
+
+## Что сделано
+
+1. **Мультифилиальность (Бишкек / Кант)** — `0af7564` (#19)
+   - После регистрации пользователю шлётся адрес маркетплейса (Pinduoduo) с его client code.
+   - Регистрация: новый пользователь выбирает филиал ("г. Бишкек" / "г. Кант") инлайн-кнопками; выбор определяет, в какой БД живёт пользователь/посылки/промокоды.
+   - У каждого филиала своя изолированная Postgres БД (`DATABASE_URL` / `DATABASE_URL_KANT`), второй контейнер в docker-compose; entrypoint-скрипты и deploy workflow применяют миграции и создают обе БД автоматически.
+   - Админка получила переключатель филиала в сайдбаре; все страницы (users, packages, promo codes, settings, marketplaces, DB dump) работают с выбранным филиалом, хранящимся в сессии админа.
+
+2. **Переписана админка на Vue 3 SPA + Tailwind CSS v4** — `16721a0` (#20)
+   - Старая админка была server-side rendered (Express + hand-rolled формы + vanilla JS). Заменена на JSON API + client-rendered SPA.
+   - Express-роуты вынесены в JSON REST API под `/api/admin/*` (`src/admin/api.ts`, `auth.ts`, `notify.ts`), с переиспользованием branch-aware Prisma/session логики.
+   - Добавлен `admin-ui/`: Vue 3 + Vite + Tailwind v4 SPA, покрывающий все прежние страницы (dashboard, users, packages, promo codes, settings, marketplaces) + сканер штрихкодов, массовый редактор статусов посылок, Excel import/export, drag-drop загрузка файлов маркетплейсов, переключатель филиала.
+   - Express отдаёт собранный SPA под `/admin` с client-side routing fallback, JSON API под `/api/admin`.
+   - Новый build stage `admin-ui` в Dockerfile.
+   - Упрощение: фильтр по датам в packages теперь на нативных `<input type=date>` вместо flatpickr (убрана CDN-зависимость).
+
+3. **Юнит-тесты, покрытие 80%+** — `b39fedd`
+   - Backend (vitest + supertest): `userService`, branch-хелперы `prismaClient`, `admin/auth.ts`, `admin/notify.ts`, весь JSON API `admin/api.ts` (мокается Prisma и `child_process`), регистрация/меню/callback-флоу `botController` через фейковый Bot-харнесс, перехватывающий зарегистрированные хендлеры.
+   - Добавлен `__resetRegStateForTests()` в `botController.ts` для чистого состояния регистрации между тестами.
+   - Admin UI (vitest + @vue/test-utils + jsdom): api client, Pinia auth store, router auth guard, `FileDropZone`, `AdminLayout`, `App.vue`, все 12 views (формы, фильтры, пагинация, bulk-редактор статусов, симуляция сканера штрихкодов, Excel import, загрузка файлов маркетплейсов).
+   - Пороги покрытия (80% lines/statements/functions, 75% branches) включены через `npm run test:coverage` в обоих проектах.
+   - Итог: backend — 94% statements / 82% branches / 91% functions / 95% lines; admin-ui — 94% statements / 97% branches / 83% functions / 95% lines.
+
+4. **Неограниченное число кнопок менеджеров в настройках** — PR [#22](https://github.com/elvn5/dix_cargo/pull/22) (смержен)
+   - Жёстко зашитые `manager_1_name/url`, `manager_2_name/url` заменены на JSON-массив `manager_buttons` (произвольное число `{name, url}`).
+   - `src/admin/api.ts`: `GET/PUT /admin/settings` читают/пишут массив менеджеров; для филиалов, где новый формат ещё не сохранён, значения читаются из старых `manager_1/2_*` ключей (fallback без миграции).
+   - `src/controllers/botController.ts`: `getManagersKeyboard` строит инлайн-клавиатуру рядами по 2 из списка менеджеров.
+   - `admin-ui/.../SettingsView.vue`: динамический список менеджеров с кнопками добавить/удалить строку.
+   - Ветка `feat/unlimited-manager-buttons` создана от актуального `main` (после того как #21 смержился отдельным squash-коммитом, а `feat/admin-vue-migration` устарела).
+
+5. **Спиннеры загрузки в админке** — PR [#23](https://github.com/elvn5/dix_cargo/pull/23) (смержен)
+   - Причина: во многих view контент "выпрыгивал" после ответа API (пустая таблица/форма резко сменялась заполненной) — дёргающийся UI.
+   - Добавлен переиспользуемый `admin-ui/src/components/LoadingSpinner.vue` (CSS-спиннер на Tailwind `animate-spin`, без внешних зависимостей).
+   - Dashboard, UserDetail, PackageDetail — текст "Загрузка…" заменён на визуальный спиннер (loading-state уже был).
+   - UsersListView, PackagesListView, PromoCodesView — раньше loading-state не было вовсе; добавлен `loading` ref, спиннер показывается в теле таблицы, шапка/фильтры остаются видимыми.
+   - MarketplacesView, SettingsView — весь блок формы прячется за спиннером, пока не подгрузятся данные.
+   - Ветка `feat/settings-loading-spinners` создана от `main` (после мержа #22).
+
+## Текущее состояние
+- Локальная ветка: `feat/settings-loading-spinners`, синхронизирована с `origin`, рабочее дерево чистое (кроме `.CLAUDE_MEMORY`).
+- `main` на GitHub включает смерженные PR: #19, #20, #21, #22, #23.
+- Полезный паттерн для локальной проверки без риска для прод-бота: временный `verify-admin-temp.ts` (создаёт `createAdminApp(bot)` без `bot.start()`) + временный конфиг в `.claude/launch.json` на альтернативных портах (3010/5183) + временная правка прокси в `admin-ui/vite.config.ts` — всё убирается после проверки. **Никогда не гонять реальный `npm run dev`/`src/index.ts` параллельно с прод-контейнером — вызовет конфликт long polling в Telegram.**
