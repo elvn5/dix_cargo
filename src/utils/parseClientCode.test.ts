@@ -39,11 +39,11 @@ describe("parseClientCode", () => {
     expect(parseClientCode("JT5485640575332")).toBeNull();
   });
 
-  it("supports a custom prefix (Кант — DIX2)", () => {
-    expect(parseClientCode("2222", "DIX2")).toBe("DIX2-2222");
-    expect(parseClientCode("DIX2-0022", "DIX2")).toBe("DIX2-0022");
-    expect(parseClientCode("DIX2 22", "DIX2")).toBe("DIX2-0022");
-    expect(parseClientCode("dix2-9999", "DIX2")).toBe("DIX2-9999");
-    expect(parseClientCode("DIX-2222", "DIX2")).toBeNull();
+  it("supports a custom prefix (Кант — KADIX)", () => {
+    expect(parseClientCode("2222", "KADIX")).toBe("KADIX-2222");
+    expect(parseClientCode("KADIX-0022", "KADIX")).toBe("KADIX-0022");
+    expect(parseClientCode("KADIX 22", "KADIX")).toBe("KADIX-0022");
+    expect(parseClientCode("kadix-9999", "KADIX")).toBe("KADIX-9999");
+    expect(parseClientCode("DIX-2222", "KADIX")).toBeNull();
   });
 });

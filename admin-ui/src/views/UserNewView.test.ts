@@ -26,10 +26,10 @@ function flushPromises() {
 
 describe("UserNewView", () => {
   it("loads the branch's client-code prefix for the placeholder", async () => {
-    vi.mocked(api.get).mockResolvedValue({ codePrefix: "DIX2" });
+    vi.mocked(api.get).mockResolvedValue({ codePrefix: "KADIX" });
     const wrapper = mount(UserNewView, globalStubs);
     await flushPromises();
-    expect(wrapper.find('input[placeholder="DIX2-0001"]').exists()).toBe(true);
+    expect(wrapper.find('input[placeholder="KADIX-0001"]').exists()).toBe(true);
   });
 
   it("flags an invalid phone on submit without calling the API", async () => {

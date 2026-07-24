@@ -45,10 +45,10 @@ describe("userService.generateClientCode", () => {
     expect(code).toBe("DIX-0001");
   });
 
-  it("uses the DIX2 prefix for Кант", async () => {
+  it("uses the KADIX prefix for Кант", async () => {
     const db = fakeDb();
     const code = await userService.generateClientCode(db, "kant");
-    expect(code).toBe("DIX2-0001");
+    expect(code).toBe("KADIX-0001");
   });
 
   it("skips numbers already taken", async () => {
