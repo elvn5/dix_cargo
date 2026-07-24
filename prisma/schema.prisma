@@ -16,6 +16,12 @@ enum PackageStatus {
   DELIVERED
 }
 
+enum ResetRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model Package {
   id         Int           @id @default(autoincrement())
   track_code String
@@ -52,16 +58,29 @@ model Setting {
 }
 
 model User {
-  id          Int         @id @default(autoincrement())
-  telegram_id BigInt      @unique
-  phone       String      @unique
-  full_name   String
-  client_code String      @unique
-  packages    Package[]
-  promo_codes PromoCode[]
+  id            Int                  @id @default(autoincrement())
+  telegram_id   BigInt               @unique
+  phone         String               @unique
+  full_name     String
+  client_code   String               @unique
+  packages      Package[]
+  promo_codes   PromoCode[]
+  reset_requests AccessResetRequest[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   @@map("users")
+}
+
+model AccessResetRequest {
+  id                    Int                @id @default(autoincrement())
+  user_id               Int
+  user                  User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  requested_telegram_id BigInt
+  status                ResetRequestStatus @default(PENDING)
+  created_at            DateTime           @default(now())
+  resolved_at           DateTime?
+
+  @@map("access_reset_requests")
 }

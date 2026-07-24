@@ -74,6 +74,11 @@ function fakeDb(overrides: Record<string, any> = {}) {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
     },
+    accessResetRequest: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
   };
   for (const [model, methods] of Object.entries(overrides)) {
     Object.assign((base as any)[model], methods);
@@ -271,6 +276,51 @@ describe("marketplace address callback", () => {
     const ctx = fakeCtx();
     await handler(ctx);
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("????"), expect.any(Object));
+  });
+});
+
+describe("reset_request callback", () => {
+  it("creates a reset request and confirms submission", async () => {
+    const create = vi.fn().mockResolvedValue({ id: 1 });
+    getPrismaMock.mockImplementation(() => fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue(fakeUser({ id: 42 })) },
+      accessResetRequest: { findFirst: vi.fn().mockResolvedValue(null), create },
+    }));
+
+    const bot = setupBot();
+    const handler = findRegexHandler(bot, "callbackQuery", /^reset_request:(bishkek|kant):(\d+)$/);
+    const ctx = fakeCtx({ from: { id: 999 }, match: ["reset_request:kant:42", "kant", "42"] });
+    await handler(ctx);
+
+    expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith({ data: { user_id: 42, requested_telegram_id: 999n } });
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("Заявка на сброс доступа отправлена"));
+  });
+
+  it("updates the existing pending request instead of duplicating it", async () => {
+    const update = vi.fn().mockResolvedValue({ id: 7 });
+    getPrismaMock.mockImplementation(() => fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue(fakeUser({ id: 42 })) },
+      accessResetRequest: { findFirst: vi.fn().mockResolvedValue({ id: 7, user_id: 42, requested_telegram_id: 111n, status: "PENDING" }), update },
+    }));
+
+    const bot = setupBot();
+    const handler = findRegexHandler(bot, "callbackQuery", /^reset_request:(bishkek|kant):(\d+)$/);
+    const ctx = fakeCtx({ from: { id: 999 }, match: ["reset_request:kant:42", "kant", "42"] });
+    await handler(ctx);
+
+    expect(update).toHaveBeenCalledWith({ where: { id: 7 }, data: { requested_telegram_id: 999n } });
+  });
+
+  it("tells the user when the account no longer exists", async () => {
+    getPrismaMock.mockImplementation(() => fakeDb({ user: { findUnique: vi.fn().mockResolvedValue(null) } }));
+
+    const bot = setupBot();
+    const handler = findRegexHandler(bot, "callbackQuery", /^reset_request:(bishkek|kant):(\d+)$/);
+    const ctx = fakeCtx({ from: { id: 999 }, match: ["reset_request:kant:42", "kant", "42"] });
+    await handler(ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("Не удалось найти аккаунт"));
   });
 });
 
@@ -533,8 +583,8 @@ describe("message:text — registration flow", () => {
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("DIX-0001"), expect.any(Object));
   });
 
-  it("rejects a phone already linked to a different Telegram account", async () => {
-    const linked = fakeUser({ telegram_id: 222n });
+  it("rejects a phone already linked to a different Telegram account, offering a reset button", async () => {
+    const linked = fakeUser({ id: 42, telegram_id: 222n });
     getPrismaMock.mockImplementation(() => fakeDb({ user: { findFirst: vi.fn().mockResolvedValue(linked) } }));
 
     const bot = setupBot();
@@ -543,7 +593,15 @@ describe("message:text — registration flow", () => {
     const handler = findHandler(bot, "on", "message:text");
     const ctx = fakeCtx({ message: { text: "500100500" } });
     await handler(ctx);
-    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("уже зарегистрирован"), expect.any(Object));
+
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.stringContaining("уже зарегистрирован"),
+      expect.objectContaining({
+        reply_markup: {
+          inline_keyboard: [[{ text: "Сбросить доступ", callback_data: "reset_request:bishkek:42" }]],
+        },
+      })
+    );
   });
 
   it("links an admin-created (unlinked) account to Telegram", async () => {

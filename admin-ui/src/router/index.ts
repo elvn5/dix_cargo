@@ -14,6 +14,7 @@ const router = createRouter({
     { path: "/packages/new", name: "package-new", component: () => import("../views/PackageNewView.vue") },
     { path: "/packages/:id", name: "package-detail", component: () => import("../views/PackageDetailView.vue"), props: true },
     { path: "/promocodes", name: "promocodes", component: () => import("../views/PromoCodesView.vue") },
+    { path: "/reset-requests", name: "reset-requests", component: () => import("../views/ResetRequestsView.vue") },
     { path: "/settings", name: "settings", component: () => import("../views/SettingsView.vue") },
     { path: "/marketplaces", name: "marketplaces", component: () => import("../views/MarketplacesView.vue") },
     { path: "/:pathMatch(.*)*", redirect: "/" },

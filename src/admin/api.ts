@@ -12,7 +12,7 @@ import { userService } from "../services/userService";
 import { parseClientCode } from "../utils/parseClientCode";
 import { parseShippingDate } from "../utils/parseShippingDate";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, APP_VERSION, IS_STAGING, getBranch, requireApiAuth } from "./auth";
-import { notifyStatusChange } from "./notify";
+import { notifyStatusChange, notifyResetDecision } from "./notify";
 
 // ── Сериализация ──────────────────────────────────────────────────────────────
 
@@ -219,6 +219,61 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
         await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
       }
     }
+    res.json({ ok: true });
+  });
+
+  // ── Заявки на сброс доступа ──────────────────────────────────────────────────
+
+  api.get("/reset-requests", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const requests = await db.accessResetRequest.findMany({
+      include: { user: { select: { id: true, client_code: true, full_name: true, phone: true, telegram_id: true } } },
+      orderBy: { created_at: "desc" },
+    });
+    res.json({
+      requests: requests.map((r) => ({
+        ...r,
+        requested_telegram_id: r.requested_telegram_id.toString(),
+        user: { ...r.user, telegram_id: r.user.telegram_id.toString() },
+      })),
+    });
+  });
+
+  api.post("/reset-requests/:id/approve", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const request = await db.accessResetRequest.findUnique({ where: { id: Number(req.params.id) } });
+    if (!request || request.status !== "PENDING") return res.status(404).json({ error: "not_found" });
+
+    try {
+      await db.user.update({
+        where: { id: request.user_id },
+        data: { telegram_id: request.requested_telegram_id },
+      });
+    } catch (e: any) {
+      if (e?.code === "P2002") return res.status(409).json({ error: "telegram_already_linked" });
+      throw e;
+    }
+
+    await db.accessResetRequest.update({
+      where: { id: request.id },
+      data: { status: "APPROVED", resolved_at: new Date() },
+    });
+
+    await notifyResetDecision(bot, request.requested_telegram_id, true);
+    res.json({ ok: true });
+  });
+
+  api.post("/reset-requests/:id/reject", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const request = await db.accessResetRequest.findUnique({ where: { id: Number(req.params.id) } });
+    if (!request || request.status !== "PENDING") return res.status(404).json({ error: "not_found" });
+
+    await db.accessResetRequest.update({
+      where: { id: request.id },
+      data: { status: "REJECTED", resolved_at: new Date() },
+    });
+
+    await notifyResetDecision(bot, request.requested_telegram_id, false);
     res.json({ ok: true });
   });
 
