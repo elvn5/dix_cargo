@@ -58,6 +58,11 @@ function fakeDb(overrides: Record<string, any> = {}) {
       create: vi.fn(),
       delete: vi.fn().mockResolvedValue({}),
     },
+    accessResetRequest: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn(),
+    },
   };
   for (const [model, methods] of Object.entries(overrides)) {
     Object.assign((base as any)[model], methods);
@@ -363,6 +368,115 @@ describe("POST /users/:id/packages/status", () => {
     const agent = await loginAgent(app);
     await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_TRANSIT" });
     expect(bot.api.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("reset-requests routes", () => {
+  function fakeRequest(overrides: Record<string, any> = {}) {
+    return {
+      id: 3,
+      user_id: 1,
+      requested_telegram_id: 777n,
+      status: "PENDING",
+      created_at: new Date("2026-01-01"),
+      resolved_at: null,
+      ...overrides,
+    };
+  }
+
+  it("GET /reset-requests lists requests with the user attached", async () => {
+    const db = fakeDb({
+      accessResetRequest: {
+        findMany: vi.fn().mockResolvedValue([
+          { ...fakeRequest(), user: { id: 1, client_code: "DIX-0001", full_name: "Иван Иванов", phone: "500100500", telegram_id: 555n } },
+        ]),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/reset-requests");
+
+    expect(res.body.requests).toHaveLength(1);
+    expect(res.body.requests[0].requested_telegram_id).toBe("777");
+    expect(res.body.requests[0].user.telegram_id).toBe("555");
+    expect(res.body.requests[0].user.client_code).toBe("DIX-0001");
+  });
+
+  it("POST /reset-requests/:id/approve relinks the user and notifies the requester", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      accessResetRequest: { findUnique: vi.fn().mockResolvedValue(fakeRequest()) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/reset-requests/3/approve");
+
+    expect(res.body).toEqual({ ok: true });
+    expect(db.user.update).toHaveBeenCalledWith({ where: { id: 1 }, data: { telegram_id: 777n } });
+    expect(db.accessResetRequest.update).toHaveBeenCalledWith({
+      where: { id: 3 },
+      data: { status: "APPROVED", resolved_at: expect.any(Date) },
+    });
+    expect(bot.api.sendMessage).toHaveBeenCalledWith(777, expect.stringContaining("успешно сброшен"), { parse_mode: "HTML" });
+  });
+
+  it("POST /reset-requests/:id/approve returns 409 when the telegram id is already linked to another account", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      accessResetRequest: { findUnique: vi.fn().mockResolvedValue(fakeRequest()) },
+      user: { update: vi.fn().mockRejectedValue({ code: "P2002" }) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/reset-requests/3/approve");
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "telegram_already_linked" });
+    expect(db.accessResetRequest.update).not.toHaveBeenCalled();
+  });
+
+  it("POST /reset-requests/:id/approve 404s for a request that's already resolved", async () => {
+    const db = fakeDb({
+      accessResetRequest: { findUnique: vi.fn().mockResolvedValue(fakeRequest({ status: "APPROVED" })) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/reset-requests/3/approve");
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /reset-requests/:id/reject marks the request rejected and notifies the requester", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      accessResetRequest: { findUnique: vi.fn().mockResolvedValue(fakeRequest()) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/reset-requests/3/reject");
+
+    expect(res.body).toEqual({ ok: true });
+    expect(db.user.update).not.toHaveBeenCalled();
+    expect(db.accessResetRequest.update).toHaveBeenCalledWith({
+      where: { id: 3 },
+      data: { status: "REJECTED", resolved_at: expect.any(Date) },
+    });
+    expect(bot.api.sendMessage).toHaveBeenCalledWith(777, expect.stringContaining("отклонена"), { parse_mode: "HTML" });
+  });
+
+  it("POST /reset-requests/:id/reject 404s for an unknown request", async () => {
+    const db = fakeDb({
+      accessResetRequest: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/reset-requests/999/reject");
+    expect(res.status).toBe(404);
   });
 });
 

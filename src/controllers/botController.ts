@@ -1,5 +1,6 @@
 import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
+import { resetRequestService } from "../services/resetRequestService";
 import { getPrisma, DEFAULT_BRANCH, branchLabel, type Branch } from "../database/prismaClient";
 import type { PrismaClient } from "@prisma/client";
 import path from "path";
@@ -216,6 +217,27 @@ export function registerControllers(bot: Bot<Context>): void {
         reply_markup: { remove_keyboard: true },
       }
     );
+  });
+
+  // ── Заявка на сброс доступа ───────────────────────────────────────────────────
+  bot.callbackQuery(/^reset_request:(bishkek|kant):(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const senderId = ctx.from?.id;
+    if (!senderId) return;
+
+    const branch = ctx.match[1] as Branch;
+    const userId = Number(ctx.match[2]);
+    const db = getPrisma(branch);
+
+    const user = await db.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      await ctx.reply("⚠️ Не удалось найти аккаунт для сброса. Обратитесь к менеджеру.");
+      return;
+    }
+
+    await resetRequestService.createOrUpdate(db, userId, BigInt(senderId));
+
+    await ctx.reply("✅ Заявка на сброс доступа отправлена. Ожидайте одобрения от администратора.");
   });
 
   // ── Команды меню ─────────────────────────────────────────────────────────────
@@ -609,8 +631,15 @@ export function registerControllers(bot: Bot<Context>): void {
               { parse_mode: "HTML", reply_markup: await getMenuKeyboard(db) });
           } else {
             await ctx.reply(
-              "❌ Этот номер телефона уже зарегистрирован.\n\nВведите другой номер или обратитесь к менеджеру.",
-              { parse_mode: "HTML" }
+              "❌ Этот номер телефона уже зарегистрирован.\n\nВведите другой номер или запросите сброс доступа к аккаунту.",
+              {
+                parse_mode: "HTML",
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: "Сбросить доступ", callback_data: `reset_request:${state.branch}:${phoneUser.id}` },
+                  ]],
+                },
+              }
             );
           }
           return;

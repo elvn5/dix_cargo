@@ -13,6 +13,7 @@ const navItems = [
   { to: "/users", label: "Пользователи", icon: "bi-people" },
   { to: "/packages", label: "Посылки", icon: "bi-box-seam" },
   { to: "/promocodes", label: "Промокоды", icon: "bi-ticket-perforated" },
+  { to: "/reset-requests", label: "Заявки на сброс", icon: "bi-person-lock" },
   { to: "/marketplaces", label: "Маркетплейсы", icon: "bi-shop" },
   { to: "/settings", label: "Настройки бота", icon: "bi-gear" },
 ];

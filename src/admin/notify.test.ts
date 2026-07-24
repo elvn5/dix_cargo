@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PrismaClient, User } from "@prisma/client";
 import type { Bot, Context } from "grammy";
-import { notifyStatusChange } from "./notify";
+import { notifyStatusChange, notifyResetDecision } from "./notify";
 
 function fakeDb(user: Partial<User> | null) {
   return {
@@ -96,5 +96,38 @@ describe("notifyStatusChange", () => {
     await expect(
       notifyStatusChange(bot, db, 1, "DIX-0001", ["TRACK1"], "IN_OFFICE")
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("notifyResetDecision", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends an approval message", async () => {
+    const bot = fakeBot();
+    await notifyResetDecision(bot, 555n, true);
+
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+    const [chatId, text, opts] = (bot.api.sendMessage as any).mock.calls[0];
+    expect(chatId).toBe(555);
+    expect(text).toContain("успешно сброшен");
+    expect(opts).toEqual({ parse_mode: "HTML" });
+  });
+
+  it("sends a rejection message", async () => {
+    const bot = fakeBot();
+    await notifyResetDecision(bot, 555n, false);
+
+    const [, text] = (bot.api.sendMessage as any).mock.calls[0];
+    expect(text).toContain("отклонена");
+  });
+
+  it("swallows errors instead of throwing", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const bot = fakeBot();
+    (bot.api.sendMessage as any).mockRejectedValue(new Error("network down"));
+
+    await expect(notifyResetDecision(bot, 555n, true)).resolves.toBeUndefined();
   });
 });

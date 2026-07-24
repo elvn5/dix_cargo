@@ -37,3 +37,14 @@ export async function notifyStatusChange(
     console.error("[Admin] Не удалось отправить уведомление пользователю:", err);
   }
 }
+
+export async function notifyResetDecision(bot: Bot<Context>, telegramId: bigint, approved: boolean) {
+  try {
+    const text = approved
+      ? "✅ Доступ к аккаунту успешно сброшен. Теперь вы можете пользоваться ботом с этого аккаунта — отправьте /start."
+      : "❌ Ваша заявка на сброс доступа отклонена. Обратитесь к менеджеру.";
+    await bot.api.sendMessage(Number(telegramId), text, { parse_mode: "HTML" });
+  } catch (err) {
+    console.error("[Admin] Не удалось отправить уведомление о заявке на сброс доступа:", err);
+  }
+}
