@@ -22,10 +22,10 @@ function flushPromises() {
 
 describe("PackagesImportView", () => {
   it("shows the branch's code-prefix examples", async () => {
-    vi.mocked(api.get).mockResolvedValue({ codePrefix: "DIX2" });
+    vi.mocked(api.get).mockResolvedValue({ codePrefix: "KADIX" });
     const wrapper = mount(PackagesImportView, globalStubs);
     await flushPromises();
-    expect(wrapper.text()).toContain("DIX22222");
+    expect(wrapper.text()).toContain("KADIX2222");
   });
 
   it("does nothing on submit without a selected file", async () => {

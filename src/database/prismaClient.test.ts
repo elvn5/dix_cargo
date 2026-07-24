@@ -36,9 +36,9 @@ describe("branchLabel", () => {
 });
 
 describe("clientCodePrefix", () => {
-  it("returns DIX for bishkek and DIX2 for kant", () => {
+  it("returns DIX for bishkek and KADIX for kant", () => {
     expect(clientCodePrefix("bishkek")).toBe("DIX");
-    expect(clientCodePrefix("kant")).toBe("DIX2");
+    expect(clientCodePrefix("kant")).toBe("KADIX");
   });
 });
 

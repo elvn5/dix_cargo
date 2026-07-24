@@ -24,7 +24,7 @@ export function branchLabel(branch: Branch): string {
 
 const CLIENT_CODE_PREFIX: Record<Branch, string> = {
   bishkek: "DIX",
-  kant: "DIX2",
+  kant: "KADIX",
 };
 
 export function clientCodePrefix(branch: Branch): string {

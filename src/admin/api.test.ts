@@ -562,6 +562,98 @@ describe("POST /packages/import", () => {
     expect(res.body.errors[0]).toContain("DIX-9999");
     expect(db.package.create).toHaveBeenCalledTimes(1);
   });
+
+  it("parses DIX-**** codes in all supported formats for the Бишкек branch", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001" });
+    const db = fakeDb({
+      user: { findUnique },
+      package: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const rows = [
+      ["", "", "DIX-0001", "TRACK1"], // dash
+      ["", "", "DIX0002", "TRACK2"],  // no separator
+      ["", "", "dix 0003", "TRACK3"], // space, lowercase
+    ];
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer(rows), "import.xlsx");
+
+    expect(res.body.imported).toBe(3);
+    expect(findUnique.mock.calls.map((c) => c[0].where.client_code)).toEqual([
+      "DIX-0001", "DIX-0002", "DIX-0003",
+    ]);
+  });
+
+  it("parses KADIX-**** codes in all supported formats for the Кант branch", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ id: 5, client_code: "KADIX-0001" });
+    const db = fakeDb({
+      user: { findUnique },
+      package: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const rows = [
+      ["", "", "KADIX-0001", "TRACK1"], // dash
+      ["", "", "KADIX0002", "TRACK2"],  // no separator
+      ["", "", "kadix 0003", "TRACK3"], // space, lowercase
+    ];
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/branch").send({ branch: "kant" });
+
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer(rows), "import.xlsx");
+
+    expect(res.body.imported).toBe(3);
+    expect(findUnique.mock.calls.map((c) => c[0].where.client_code)).toEqual([
+      "KADIX-0001", "KADIX-0002", "KADIX-0003",
+    ]);
+  });
+
+  it("ignores DIX-**** rows when importing for the Кант branch", async () => {
+    const findUnique = vi.fn();
+    const db = fakeDb({ user: { findUnique } });
+    getPrismaMock.mockReturnValue(db);
+
+    const rows = [["", "", "DIX-0001", "TRACK1"]];
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/branch").send({ branch: "kant" });
+
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer(rows), "import.xlsx");
+
+    expect(res.body.imported).toBe(0);
+    expect(res.body.skipped).toBe(0);
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it("ignores KADIX-**** rows when importing for the Бишкек branch", async () => {
+    const findUnique = vi.fn();
+    const db = fakeDb({ user: { findUnique } });
+    getPrismaMock.mockReturnValue(db);
+
+    const rows = [["", "", "KADIX-0001", "TRACK1"]];
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer(rows), "import.xlsx");
+
+    expect(res.body.imported).toBe(0);
+    expect(res.body.skipped).toBe(0);
+    expect(findUnique).not.toHaveBeenCalled();
+  });
 });
 
 // ── Промокоды ────────────────────────────────────────────────────────────────
