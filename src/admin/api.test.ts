@@ -48,6 +48,7 @@ function fakeDb(overrides: Record<string, any> = {}) {
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       delete: vi.fn().mockResolvedValue({}),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { weight: null } }),
     },
     setting: {
       findUnique: vi.fn().mockResolvedValue(null),
@@ -191,7 +192,10 @@ describe("GET /dashboard", () => {
           { id: 1, telegram_id: 42n, full_name: "A", phone: "1", client_code: "DIX-0001", created_at: new Date(), updated_at: new Date() },
         ]),
       },
-      package: { count: vi.fn().mockResolvedValue(5) },
+      package: {
+        count: vi.fn().mockResolvedValue(5),
+        aggregate: vi.fn().mockResolvedValue({ _sum: { weight: 12.5 } }),
+      },
     });
     getPrismaMock.mockReturnValue(db);
 
@@ -203,6 +207,22 @@ describe("GET /dashboard", () => {
     expect(res.body.totalUsers).toBe(2);
     expect(res.body.totalPackages).toBe(5);
     expect(res.body.latestUsers[0].telegram_id).toBe("42");
+    expect(res.body.period.weightDay).toBe(12.5);
+    expect(res.body.period.weightWeek).toBe(12.5);
+    expect(res.body.period.weightMonth).toBe(12.5);
+    expect(res.body.period.weightYear).toBe(12.5);
+  });
+
+  it("defaults period weights to 0 when there are no packages", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/dashboard");
+
+    expect(res.body.period.weightDay).toBe(0);
+    expect(res.body.period.weightYear).toBe(0);
   });
 });
 

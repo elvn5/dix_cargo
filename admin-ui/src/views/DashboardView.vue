@@ -15,6 +15,7 @@ interface DashboardData {
   period: {
     usersDay: number; usersWeek: number; usersMonth: number; usersYear: number;
     pkgDay: number; pkgWeek: number; pkgMonth: number; pkgYear: number;
+    weightDay: number; weightWeek: number; weightMonth: number; weightYear: number;
   };
   latestUsers: { id: number; client_code: string; full_name: string; phone: string; created_at: string }[];
 }
@@ -29,6 +30,10 @@ onMounted(async () => {
 
 function fmtDate(s: string) {
   return new Date(s).toLocaleString("ru-RU");
+}
+
+function fmtWeight(kg: number) {
+  return `${kg.toFixed(1)} кг`;
 }
 </script>
 
@@ -85,6 +90,13 @@ function fmtDate(s: string) {
               <td>{{ data.period.pkgWeek }}</td>
               <td>{{ data.period.pkgMonth }}</td>
               <td>{{ data.period.pkgYear }}</td>
+            </tr>
+            <tr>
+              <td class="font-semibold text-left!">⚖️ Вес посылок</td>
+              <td>{{ fmtWeight(data.period.weightDay) }}</td>
+              <td>{{ fmtWeight(data.period.weightWeek) }}</td>
+              <td>{{ fmtWeight(data.period.weightMonth) }}</td>
+              <td>{{ fmtWeight(data.period.weightYear) }}</td>
             </tr>
           </tbody>
         </table>

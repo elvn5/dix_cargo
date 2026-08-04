@@ -94,10 +94,14 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const soy = new Date(now.getFullYear(), 0, 1);
     const since = (d: Date) => ({ gte: d });
 
+    const sumWeight = (d: Date) =>
+      db.package.aggregate({ where: { created_at: since(d) }, _sum: { weight: true } });
+
     const [
       totalUsers, totalPackages,
       usersDay, usersWeek, usersMonth, usersYear,
       pkgDay, pkgWeek, pkgMonth, pkgYear,
+      weightDay, weightWeek, weightMonth, weightYear,
       pkgOffice, pkgTransit, pkgDelivered,
       latestUsers,
     ] = await Promise.all([
@@ -111,6 +115,10 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       db.package.count({ where: { created_at: since(sow) } }),
       db.package.count({ where: { created_at: since(som) } }),
       db.package.count({ where: { created_at: since(soy) } }),
+      sumWeight(sod),
+      sumWeight(sow),
+      sumWeight(som),
+      sumWeight(soy),
       db.package.count({ where: { status: "IN_OFFICE" } }),
       db.package.count({ where: { status: "IN_TRANSIT" } }),
       db.package.count({ where: { status: "DELIVERED" } }),
@@ -119,7 +127,14 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
     res.json({
       totalUsers, totalPackages, pkgOffice, pkgTransit, pkgDelivered,
-      period: { usersDay, usersWeek, usersMonth, usersYear, pkgDay, pkgWeek, pkgMonth, pkgYear },
+      period: {
+        usersDay, usersWeek, usersMonth, usersYear,
+        pkgDay, pkgWeek, pkgMonth, pkgYear,
+        weightDay: weightDay._sum.weight ?? 0,
+        weightWeek: weightWeek._sum.weight ?? 0,
+        weightMonth: weightMonth._sum.weight ?? 0,
+        weightYear: weightYear._sum.weight ?? 0,
+      },
       latestUsers: latestUsers.map(serializeUser),
     });
   });
