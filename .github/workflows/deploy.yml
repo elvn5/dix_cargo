@@ -76,7 +76,18 @@ jobs:
 
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            docker compose -p cargo_staging -f docker-compose.prod.yml pull
+            n=0
+            until [ "$n" -ge 5 ]; do
+              docker compose -p cargo_staging -f docker-compose.prod.yml pull && break
+              n=$((n+1))
+              echo "docker compose pull failed (attempt $n/5), retrying in 10s..."
+              sleep 10
+            done
+            if [ "$n" -ge 5 ]; then
+              echo "docker compose pull failed after 5 attempts"
+              exit 1
+            fi
+
             docker compose -p cargo_staging -f docker-compose.prod.yml up -d
             docker image prune -f
 
@@ -152,6 +163,17 @@ jobs:
 
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            docker compose -p cargo_prod -f docker-compose.prod.yml pull
+            n=0
+            until [ "$n" -ge 5 ]; do
+              docker compose -p cargo_prod -f docker-compose.prod.yml pull && break
+              n=$((n+1))
+              echo "docker compose pull failed (attempt $n/5), retrying in 10s..."
+              sleep 10
+            done
+            if [ "$n" -ge 5 ]; then
+              echo "docker compose pull failed after 5 attempts"
+              exit 1
+            fi
+
             docker compose -p cargo_prod -f docker-compose.prod.yml up -d
             docker image prune -f
