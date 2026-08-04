@@ -11,6 +11,7 @@ import {
 import { userService } from "../services/userService";
 import { parseClientCode } from "../utils/parseClientCode";
 import { parseShippingDate } from "../utils/parseShippingDate";
+import { DEFAULT_SUPPORT_TEXT } from "../utils/supportText";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, APP_VERSION, IS_STAGING, getBranch, requireApiAuth } from "./auth";
 import { notifyStatusChange, notifyResetDecision } from "./notify";
 
@@ -501,7 +502,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
   // ── Настройки ──────────────────────────────────────────────────────────────
 
-  const SETTINGS_KEYS = ["forbidden_items", "tariff_per_kg"];
+  const SETTINGS_KEYS = ["forbidden_items", "tariff_per_kg", "support_text"];
   const LEGACY_MANAGER_KEYS = ["manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"];
   const DEFAULT_MANAGERS = [
     { name: "Лидия", url: "https://wa.me/996550867414" },
@@ -534,6 +535,8 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const settings = await db.setting.findMany({ where: { key: { in: SETTINGS_KEYS } } });
     const s: Record<string, string> = {};
     for (const row of settings) s[row.key] = row.value;
+    // Показываем текст поддержки по умолчанию, пока он не сохранён — чтобы админ правил реальное сообщение
+    if (!s.support_text?.trim()) s.support_text = DEFAULT_SUPPORT_TEXT;
     const managers = await loadManagers(db);
     res.json({ settings: s, managers });
   });

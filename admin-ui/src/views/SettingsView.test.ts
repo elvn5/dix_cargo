@@ -41,13 +41,33 @@ describe("SettingsView", () => {
 
   it("loads saved values when present", async () => {
     vi.mocked(api.get).mockResolvedValue({
-      settings: { tariff_per_kg: "150", forbidden_items: "золото" },
+      settings: { tariff_per_kg: "150", forbidden_items: "золото", support_text: "💬 Поддержка" },
       managers: [{ name: "Аня", url: "https://wa.me/1" }],
     });
     const wrapper = mount(SettingsView);
     await flushPromises();
     expect((wrapper.find('input[type=number]').element as HTMLInputElement).value).toBe("150");
-    expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("золото");
+    expect((wrapper.find('[data-test="forbidden-items"]').element as HTMLTextAreaElement).value).toBe("золото");
+    expect((wrapper.find('[data-test="support-text"]').element as HTMLTextAreaElement).value).toBe("💬 Поддержка");
+  });
+
+  it("saves the edited support message", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      settings: { support_text: "старый текст" },
+      managers: [{ name: "Аня", url: "https://wa.me/1" }],
+    });
+    vi.mocked(api.put).mockResolvedValue({ ok: true });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+
+    await wrapper.find('[data-test="support-text"]').setValue("новый текст поддержки");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(api.put).toHaveBeenCalledWith(
+      "/admin/settings",
+      expect.objectContaining({ support_text: "новый текст поддержки" }),
+    );
   });
 
   it("adds and removes manager rows, allowing an unlimited number of buttons", async () => {
