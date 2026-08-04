@@ -9,6 +9,7 @@ pageTitle.value = "Настройки бота";
 const form = reactive({
   tariff_per_kg: "",
   forbidden_items: "",
+  support_text: "",
 });
 
 const managers = ref<{ name: string; url: string }[]>([]);
@@ -20,6 +21,7 @@ async function load() {
   const data = await api.get<{ settings: Record<string, string>; managers: { name: string; url: string }[] }>("/admin/settings");
   form.tariff_per_kg = data.settings.tariff_per_kg ?? "";
   form.forbidden_items = data.settings.forbidden_items ?? "";
+  form.support_text = data.settings.support_text ?? "";
   managers.value = data.managers.length ? data.managers.map(m => ({ ...m })) : [{ name: "", url: "" }];
   loading.value = false;
 }
@@ -97,9 +99,31 @@ onMounted(load);
         <hr class="border-slate-200" />
 
         <div>
+          <h2 class="font-bold mb-3">💬 Сообщение «Поддержка»</h2>
+          <label class="text-xs text-slate-400 mb-1 block">
+            Поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;a href="..."&gt;). Кнопки менеджеров и соцсетей добавляются автоматически.
+          </label>
+          <textarea
+            v-model="form.support_text"
+            class="textarea font-mono"
+            rows="8"
+            data-test="support-text"
+            required
+          ></textarea>
+        </div>
+
+        <hr class="border-slate-200" />
+
+        <div>
           <h2 class="font-bold mb-3">🚫 Запрещённые товары</h2>
           <label class="text-xs text-slate-400 mb-1 block">Поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;)</label>
-          <textarea v-model="form.forbidden_items" class="textarea font-mono" rows="18" required></textarea>
+          <textarea
+            v-model="form.forbidden_items"
+            class="textarea font-mono"
+            rows="18"
+            data-test="forbidden-items"
+            required
+          ></textarea>
         </div>
 
         <button class="btn btn-primary" :disabled="submitting">

@@ -2,6 +2,7 @@ import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
 import { resetRequestService } from "../services/resetRequestService";
 import { getPrisma, DEFAULT_BRANCH, branchLabel, type Branch } from "../database/prismaClient";
+import { DEFAULT_SUPPORT_TEXT } from "../utils/supportText";
 import type { PrismaClient } from "@prisma/client";
 import path from "path";
 import fs from "fs";
@@ -789,11 +790,10 @@ async function handleProfile(ctx: Context) {
 async function handleSupport(ctx: Context) {
   const db = await resolveDbForCtx(ctx);
   const managersKb = await getManagersKeyboard(db);
+  const setting = await db.setting.findUnique({ where: { key: "support_text" } });
+  const text = setting?.value.trim() || DEFAULT_SUPPORT_TEXT;
   await ctx.reply(
-    "💬 <b>Поддержка</b>\n\nСвяжитесь с нами любым удобным способом:\n\n" +
-      "📍 Адрес: Бишкек, Айбек-Ата 1/2\n" +
-      "🕒 График работы: Ежедневно с 9:00 до 19:00\n" +
-      "📌 Локация на карте: <a href=\"https://go.2gis.com/bwSnG\">AsDi Cargo</a>",
+    text,
     {
       parse_mode: "HTML",
       reply_markup: {

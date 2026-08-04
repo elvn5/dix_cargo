@@ -221,6 +221,21 @@ describe("menu commands", () => {
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("Поддержка"), expect.any(Object));
   });
 
+  it("/support uses the text configured in the admin panel", async () => {
+    getPrismaMock.mockImplementation(() => fakeDb({
+      setting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockImplementation(({ where }: any) =>
+          where.key === "support_text" ? { key: "support_text", value: "Свой текст поддержки" } : null),
+      },
+    }));
+    const bot = setupBot();
+    const handler = findHandler(bot, "command", "support");
+    const ctx = fakeCtx();
+    await handler(ctx);
+    expect(ctx.reply).toHaveBeenCalledWith("Свой текст поддержки", expect.any(Object));
+  });
+
   it("/template shows the marketplace picker", async () => {
     const bot = setupBot();
     const handler = findHandler(bot, "command", "template");

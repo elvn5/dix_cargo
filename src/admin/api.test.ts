@@ -815,7 +815,8 @@ describe("settings routes", () => {
     const app = buildApp();
     const agent = await loginAgent(app);
     const res = await agent.get("/api/admin/settings");
-    expect(res.body.settings).toEqual({ tariff_per_kg: "100" });
+    expect(res.body.settings.tariff_per_kg).toBe("100");
+    expect(res.body.settings.support_text).toContain("Поддержка");
     expect(res.body.managers).toEqual([
       { name: "Лидия", url: "https://wa.me/996550867414" },
       { name: "Виктория", url: "https://wa.me/996556969906" },
@@ -850,6 +851,33 @@ describe("settings routes", () => {
     expect(db.setting.upsert).toHaveBeenCalledTimes(1);
     expect(db.setting.upsert).toHaveBeenCalledWith({
       where: { key: "tariff_per_kg" }, update: { value: "150" }, create: { key: "tariff_per_kg", value: "150" },
+    });
+  });
+
+  it("GET /settings returns the saved support text instead of the default", async () => {
+    const db = fakeDb({
+      setting: {
+        findMany: vi.fn().mockResolvedValue([{ key: "support_text", value: "Наш новый текст" }]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/settings");
+    expect(res.body.settings.support_text).toBe("Наш новый текст");
+  });
+
+  it("PUT /settings upserts the support text", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.put("/api/admin/settings").send({ support_text: "💬 <b>Поддержка</b>" });
+    expect(db.setting.upsert).toHaveBeenCalledWith({
+      where: { key: "support_text" },
+      update: { value: "💬 <b>Поддержка</b>" },
+      create: { key: "support_text", value: "💬 <b>Поддержка</b>" },
     });
   });
 
