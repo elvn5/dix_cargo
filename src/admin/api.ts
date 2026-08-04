@@ -21,6 +21,26 @@ function serializeUser<T extends { telegram_id: bigint }>(user: T) {
   return { ...user, telegram_id: user.telegram_id.toString() };
 }
 
+/** Значение настройки из тела запроса: строка или число (числовые поля формы приходят как number). */
+function settingValue(raw: unknown): string | null {
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
+  return null;
+}
+
+/** Число из тела запроса (строка или number); null — если пусто или не число. */
+function numOrNull(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = typeof raw === "number" ? raw : parseFloat(String(raw));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Тариф филиала в сомах за кг; 0 — если не задан. */
+async function loadTariff(db: ReturnType<typeof getPrisma>): Promise<number> {
+  const setting = await db.setting.findUnique({ where: { key: "tariff_per_kg" } });
+  return parseFloat(setting?.value ?? "0") || 0;
+}
+
 export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void {
   const api = Router();
 
@@ -158,16 +178,12 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const user = await db.user.findUnique({ where: { id: Number(req.params.id) } });
     if (!user) return res.status(404).json({ error: "not_found" });
 
-    const [packages, tariffSetting] = await Promise.all([
+    const [packages, tariff] = await Promise.all([
       db.package.findMany({ where: { user_id: user.id }, orderBy: { created_at: "desc" } }),
-      db.setting.findUnique({ where: { key: "tariff_per_kg" } }),
+      loadTariff(db),
     ]);
 
-    res.json({
-      user: serializeUser(user),
-      packages,
-      tariff: parseFloat(tariffSetting?.value ?? "0") || 0,
-    });
+    res.json({ user: serializeUser(user), packages, tariff });
   });
 
   api.put("/users/:id", requireApiAuth, async (req, res) => {
@@ -197,15 +213,25 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
   api.post("/users/:id/packages/status", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const userId = Number(req.params.id);
-    const { ids, status, weight, price } = req.body as { ids: number[]; status: string; weight?: string; price?: string };
+    const { ids, status, weight, price } = req.body as {
+      ids: number[]; status: string; weight?: string | number; price?: string | number;
+    };
     const validStatuses = ["IN_TRANSIT", "IN_OFFICE", "DELIVERED"];
     if (!validStatuses.includes(status)) return res.status(400).json({ error: "invalid_status" });
 
     const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
     if (idList.length > 0) {
+      const w = numOrNull(weight);
+      // Если вес указан, а цена нет — считаем её по тарифу филиала
+      let p = numOrNull(price);
+      if (w !== null && p === null) {
+        const tariff = await loadTariff(db);
+        if (tariff > 0) p = Number((w * tariff).toFixed(2));
+      }
+
       const data: Record<string, unknown> = { status };
-      if (weight) data.weight = parseFloat(weight);
-      if (price) data.price = parseFloat(price);
+      if (w !== null) data.weight = w;
+      if (p !== null) data.price = p;
 
       await db.package.updateMany({
         where: { id: { in: idList }, user_id: userId },
@@ -215,8 +241,6 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       if (status === "IN_OFFICE" || status === "DELIVERED") {
         const user = await db.user.findUnique({ where: { id: userId } });
         const packages = await db.package.findMany({ where: { id: { in: idList } } });
-        const w = weight ? parseFloat(weight) : null;
-        const p = price ? parseFloat(price) : null;
         await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
       }
     }
@@ -324,11 +348,11 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
   api.get("/packages/new-meta", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
-    const [tariffSetting, users] = await Promise.all([
-      db.setting.findUnique({ where: { key: "tariff_per_kg" } }),
+    const [tariff, users] = await Promise.all([
+      loadTariff(db),
       db.user.findMany({ orderBy: { client_code: "asc" }, select: { id: true, client_code: true, full_name: true } }),
     ]);
-    res.json({ tariff: parseFloat(tariffSetting?.value ?? "0") || 0, users });
+    res.json({ tariff, users });
   });
 
   api.post("/packages", requireApiAuth, async (req, res) => {
@@ -435,15 +459,15 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
   api.get("/packages/:id", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
-    const [pkg, tariffSetting] = await Promise.all([
+    const [pkg, tariff] = await Promise.all([
       db.package.findUnique({
         where: { id: Number(req.params.id) },
         include: { user: { select: { client_code: true, full_name: true } } },
       }),
-      db.setting.findUnique({ where: { key: "tariff_per_kg" } }),
+      loadTariff(db),
     ]);
     if (!pkg) return res.status(404).json({ error: "not_found" });
-    res.json({ package: pkg, tariff: parseFloat(tariffSetting?.value ?? "0") || 0 });
+    res.json({ package: pkg, tariff });
   });
 
   api.put("/packages/:id", requireApiAuth, async (req, res) => {
@@ -545,9 +569,10 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const db = getPrisma(getBranch(req));
     const body = req.body as Record<string, unknown>;
     for (const key of SETTINGS_KEYS) {
-      if (typeof body[key] === "string") {
-        await db.setting.upsert({ where: { key }, update: { value: body[key] }, create: { key, value: body[key] as string } });
-      }
+      // <input type="number"> присылает число, а не строку — иначе значение молча терялось
+      const value = settingValue(body[key]);
+      if (value === null) continue;
+      await db.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
     }
     if (Array.isArray(body.managers)) {
       const managers = (body.managers as { name?: unknown; url?: unknown }[])

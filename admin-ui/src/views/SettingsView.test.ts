@@ -51,6 +51,19 @@ describe("SettingsView", () => {
     expect((wrapper.find('[data-test="support-text"]').element as HTMLTextAreaElement).value).toBe("💬 Поддержка");
   });
 
+  it("sends the edited tariff as a string (the numeric input yields a number)", async () => {
+    vi.mocked(api.get).mockResolvedValue({ settings: { tariff_per_kg: "100" }, managers: [{ name: "Аня", url: "https://wa.me/1" }] });
+    vi.mocked(api.put).mockResolvedValue({ ok: true });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+
+    await wrapper.find('input[type=number]').setValue("150");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(api.put).toHaveBeenCalledWith("/admin/settings", expect.objectContaining({ tariff_per_kg: "150" }));
+  });
+
   it("saves the edited support message", async () => {
     vi.mocked(api.get).mockResolvedValue({
       settings: { support_text: "старый текст" },
