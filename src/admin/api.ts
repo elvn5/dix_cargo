@@ -142,11 +142,18 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       : {};
 
     const [users, total] = await Promise.all([
-      db.user.findMany({ where, orderBy: { id: "desc" }, skip, take: limit }),
+      db.user.findMany({
+        where, orderBy: { id: "desc" }, skip, take: limit,
+        include: { _count: { select: { packages: true } } },
+      }),
       db.user.count({ where }),
     ]);
 
-    res.json({ users: users.map(serializeUser), total, pages: Math.ceil(total / limit) });
+    res.json({
+      users: users.map(({ _count, ...u }) => ({ ...serializeUser(u), packages_count: _count.packages })),
+      total,
+      pages: Math.ceil(total / limit),
+    });
   });
 
   api.post("/users", requireApiAuth, async (req, res) => {
@@ -243,6 +250,17 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
         const packages = await db.package.findMany({ where: { id: { in: idList } } });
         await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
       }
+    }
+    res.json({ ok: true });
+  });
+
+  api.post("/users/:id/packages/delete", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const userId = Number(req.params.id);
+    const { ids } = req.body as { ids: number[] };
+    const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
+    if (idList.length > 0) {
+      await db.package.deleteMany({ where: { id: { in: idList }, user_id: userId } });
     }
     res.json({ ok: true });
   });

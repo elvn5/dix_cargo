@@ -13,6 +13,7 @@ interface UserRow {
   full_name: string;
   phone: string;
   created_at: string;
+  packages_count: number;
 }
 
 const route = useRoute();
@@ -82,19 +83,20 @@ onMounted(load);
     <div class="table-wrap">
       <table class="data-table">
         <thead>
-          <tr><th>КОД</th><th>ФИО</th><th>Телефон</th><th>Дата регистрации</th><th></th></tr>
+          <tr><th>КОД</th><th>ФИО</th><th>Телефон</th><th>Посылки</th><th>Дата регистрации</th><th></th></tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="5"><LoadingSpinner compact label="" /></td>
+            <td colspan="6"><LoadingSpinner compact label="" /></td>
           </tr>
           <tr v-else-if="users.length === 0">
-            <td colspan="5" class="text-center text-slate-400 py-8">Нет пользователей</td>
+            <td colspan="6" class="text-center text-slate-400 py-8">Нет пользователей</td>
           </tr>
           <tr v-for="u in users" :key="u.id">
             <td><span class="badge-code">{{ u.client_code }}</span></td>
             <td>{{ u.full_name }}</td>
             <td>{{ u.phone }}</td>
+            <td><span class="badge badge-neutral">{{ u.packages_count }}</span></td>
             <td class="text-slate-400 text-xs">{{ fmtDate(u.created_at) }}</td>
             <td class="flex gap-1">
               <router-link :to="`/users/${u.id}`" class="btn btn-outline btn-sm"><i class="bi bi-pencil"></i></router-link>
