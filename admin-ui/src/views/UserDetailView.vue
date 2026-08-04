@@ -124,6 +124,57 @@ async function applyBulkStatus() {
   await load();
 }
 
+async function deleteSelected() {
+  if (selected.size === 0) return;
+  if (!confirm(`Удалить выбранные посылки (${selected.size})?`)) return;
+  await api.post(`/admin/users/${userId.value}/packages/delete`, { ids: [...selected] });
+  selected.clear();
+  await load();
+}
+
+// ── Модальное окно добавления посылки ──────────────────────────────────────
+const showAddModal = ref(false);
+const addForm = reactive({ trackCode: "", status: "IN_TRANSIT" as "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED", weight: "", price: "" });
+const addSubmitting = ref(false);
+
+watch(() => addForm.weight, (w) => {
+  if (tariff.value > 0 && w !== "") addForm.price = (parseFloat(w) * tariff.value).toFixed(2);
+});
+
+function openAddModal() {
+  addForm.trackCode = "";
+  addForm.status = "IN_TRANSIT";
+  addForm.weight = "";
+  addForm.price = "";
+  showAddModal.value = true;
+}
+
+function closeAddModal() {
+  showAddModal.value = false;
+}
+
+function onTrackCodeKeydown(e: KeyboardEvent) {
+  // Не даём завершающему Enter от сканера сабмитить форму раньше времени
+  if (e.key === "Enter") e.preventDefault();
+}
+
+async function submitAddPackage() {
+  addSubmitting.value = true;
+  try {
+    await api.post("/admin/packages", {
+      user_id: userId.value,
+      track_code: addForm.trackCode,
+      status: addForm.status,
+      weight: addForm.weight || undefined,
+      price: addForm.price || undefined,
+    });
+    showAddModal.value = false;
+    await load();
+  } finally {
+    addSubmitting.value = false;
+  }
+}
+
 function fmtDate(s: string) {
   return new Date(s).toLocaleDateString("ru-RU");
 }
@@ -260,7 +311,10 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
         </div>
       </div>
 
-      <div v-if="packages.length === 0" class="p-8 text-slate-400 text-center">Посылок нет</div>
+      <div v-if="packages.length === 0" class="p-8 text-center">
+        <div class="text-slate-400 mb-3">Посылок нет</div>
+        <button class="btn btn-outline btn-sm" @click="openAddModal"><i class="bi bi-plus-lg"></i> Добавить</button>
+      </div>
       <template v-else>
         <div class="table-wrap">
           <table class="data-table">
@@ -328,8 +382,63 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
           <button class="btn btn-primary btn-sm" :disabled="selectedCount === 0" @click="applyBulkStatus">
             <i class="bi bi-check2-all"></i> Применить к выбранным
           </button>
+          <button class="btn btn-outline-danger btn-sm" :disabled="selectedCount === 0" @click="deleteSelected">
+            <i class="bi bi-trash"></i> Удалить
+          </button>
+          <button class="btn btn-outline btn-sm" @click="openAddModal">
+            <i class="bi bi-plus-lg"></i> Добавить
+          </button>
         </div>
       </template>
+    </div>
+
+    <div v-if="showAddModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="closeAddModal">
+      <div class="card w-full max-w-md">
+        <div class="card-header flex items-center justify-between">
+          <span class="font-semibold">Новая посылка</span>
+          <button class="text-slate-400 hover:text-slate-600" @click="closeAddModal"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="p-6">
+          <form class="space-y-4" @submit.prevent="submitAddPackage">
+            <div>
+              <label class="field-label">Трек-код</label>
+              <input
+                v-model="addForm.trackCode"
+                class="input font-mono"
+                required
+                placeholder="RU123456789CN"
+                autocomplete="off"
+                @keydown="onTrackCodeKeydown"
+              />
+            </div>
+            <div>
+              <label class="field-label">Статус</label>
+              <select v-model="addForm.status" class="select">
+                <option value="IN_TRANSIT">🚚 В пути</option>
+                <option value="IN_OFFICE">🏢 В офисе</option>
+                <option value="DELIVERED">✅ Выдан</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="field-label">Вес (кг)</label>
+                <input v-model="addForm.weight" type="number" min="0" step="0.01" class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label class="field-label">Цена (сом)</label>
+                <input v-model="addForm.price" type="number" min="0" step="0.01" class="input" placeholder="0.00" />
+                <div class="field-hint">Тариф: <b>{{ tariff }} сом/кг</b></div>
+              </div>
+            </div>
+            <div class="flex gap-2 pt-2">
+              <button class="btn btn-primary" :disabled="addSubmitting">
+                <i class="bi bi-plus-lg"></i> Добавить
+              </button>
+              <button type="button" class="btn btn-outline" @click="closeAddModal">Отмена</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   </template>
 </template>

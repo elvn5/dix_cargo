@@ -29,7 +29,10 @@ describe("DashboardView", () => {
       pkgOffice: 1,
       pkgTransit: 20,
       pkgDelivered: 0,
-      period: { usersDay: 0, usersWeek: 0, usersMonth: 0, usersYear: 2, pkgDay: 0, pkgWeek: 0, pkgMonth: 0, pkgYear: 21 },
+      period: {
+        usersDay: 0, usersWeek: 0, usersMonth: 0, usersYear: 2, pkgDay: 0, pkgWeek: 0, pkgMonth: 0, pkgYear: 21,
+        weightDay: 0, weightWeek: 0, weightMonth: 0, weightYear: 305.5,
+      },
       latestUsers: [
         { id: 5, client_code: "DIX-1222", full_name: "Иван", phone: "500100500", created_at: "2026-04-23T12:55:08.112Z" },
       ],
@@ -40,13 +43,17 @@ describe("DashboardView", () => {
 
     expect(wrapper.text()).toContain("DIX-1222");
     expect(wrapper.text()).toContain("21");
+    expect(wrapper.text()).toContain("305.5 кг");
     expect(wrapper.text()).not.toContain("Загрузка");
   });
 
   it("shows an empty state when there are no users yet", async () => {
     vi.mocked(api.get).mockResolvedValue({
       totalUsers: 0, totalPackages: 0, pkgOffice: 0, pkgTransit: 0, pkgDelivered: 0,
-      period: { usersDay: 0, usersWeek: 0, usersMonth: 0, usersYear: 0, pkgDay: 0, pkgWeek: 0, pkgMonth: 0, pkgYear: 0 },
+      period: {
+        usersDay: 0, usersWeek: 0, usersMonth: 0, usersYear: 0, pkgDay: 0, pkgWeek: 0, pkgMonth: 0, pkgYear: 0,
+        weightDay: 0, weightWeek: 0, weightMonth: 0, weightYear: 0,
+      },
       latestUsers: [],
     });
     const wrapper = mount(DashboardView, globalStubs);

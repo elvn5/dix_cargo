@@ -47,6 +47,8 @@ function fakeDb(overrides: Record<string, any> = {}) {
       update: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       delete: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { weight: null } }),
     },
     setting: {
       findUnique: vi.fn().mockResolvedValue(null),
@@ -190,7 +192,10 @@ describe("GET /dashboard", () => {
           { id: 1, telegram_id: 42n, full_name: "A", phone: "1", client_code: "DIX-0001", created_at: new Date(), updated_at: new Date() },
         ]),
       },
-      package: { count: vi.fn().mockResolvedValue(5) },
+      package: {
+        count: vi.fn().mockResolvedValue(5),
+        aggregate: vi.fn().mockResolvedValue({ _sum: { weight: 12.5 } }),
+      },
     });
     getPrismaMock.mockReturnValue(db);
 
@@ -202,17 +207,33 @@ describe("GET /dashboard", () => {
     expect(res.body.totalUsers).toBe(2);
     expect(res.body.totalPackages).toBe(5);
     expect(res.body.latestUsers[0].telegram_id).toBe("42");
+    expect(res.body.period.weightDay).toBe(12.5);
+    expect(res.body.period.weightWeek).toBe(12.5);
+    expect(res.body.period.weightMonth).toBe(12.5);
+    expect(res.body.period.weightYear).toBe(12.5);
+  });
+
+  it("defaults period weights to 0 when there are no packages", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/dashboard");
+
+    expect(res.body.period.weightDay).toBe(0);
+    expect(res.body.period.weightYear).toBe(0);
   });
 });
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
 describe("users routes", () => {
-  it("GET /users lists and paginates, serializing telegram_id", async () => {
+  it("GET /users lists and paginates, serializing telegram_id and package counts", async () => {
     const db = fakeDb({
       user: {
         findMany: vi.fn().mockResolvedValue([
-          { id: 1, telegram_id: 100n, full_name: "A", phone: "1", client_code: "DIX-0001", created_at: new Date(), updated_at: new Date() },
+          { id: 1, telegram_id: 100n, full_name: "A", phone: "1", client_code: "DIX-0001", created_at: new Date(), updated_at: new Date(), _count: { packages: 3 } },
         ]),
         count: vi.fn().mockResolvedValue(1),
       },
@@ -226,6 +247,8 @@ describe("users routes", () => {
     expect(res.body.total).toBe(1);
     expect(res.body.pages).toBe(1);
     expect(res.body.users[0].telegram_id).toBe("100");
+    expect(res.body.users[0].packages_count).toBe(3);
+    expect(res.body.users[0]._count).toBeUndefined();
   });
 
   it("POST /users rejects a malformed phone", async () => {
@@ -425,6 +448,30 @@ describe("POST /users/:id/packages/status", () => {
     const agent = await loginAgent(app);
     await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_TRANSIT" });
     expect(bot.api.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /users/:id/packages/delete", () => {
+  it("deletes the given packages scoped to the user", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/users/1/packages/delete").send({ ids: [9, 10] });
+
+    expect(res.body).toEqual({ ok: true });
+    expect(db.package.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [9, 10] }, user_id: 1 } });
+  });
+
+  it("does nothing when no ids are given", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/users/1/packages/delete").send({ ids: [] });
+
+    expect(res.body).toEqual({ ok: true });
+    expect(db.package.deleteMany).not.toHaveBeenCalled();
   });
 });
 

@@ -94,10 +94,14 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const soy = new Date(now.getFullYear(), 0, 1);
     const since = (d: Date) => ({ gte: d });
 
+    const sumWeight = (d: Date) =>
+      db.package.aggregate({ where: { created_at: since(d) }, _sum: { weight: true } });
+
     const [
       totalUsers, totalPackages,
       usersDay, usersWeek, usersMonth, usersYear,
       pkgDay, pkgWeek, pkgMonth, pkgYear,
+      weightDay, weightWeek, weightMonth, weightYear,
       pkgOffice, pkgTransit, pkgDelivered,
       latestUsers,
     ] = await Promise.all([
@@ -111,6 +115,10 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       db.package.count({ where: { created_at: since(sow) } }),
       db.package.count({ where: { created_at: since(som) } }),
       db.package.count({ where: { created_at: since(soy) } }),
+      sumWeight(sod),
+      sumWeight(sow),
+      sumWeight(som),
+      sumWeight(soy),
       db.package.count({ where: { status: "IN_OFFICE" } }),
       db.package.count({ where: { status: "IN_TRANSIT" } }),
       db.package.count({ where: { status: "DELIVERED" } }),
@@ -119,7 +127,14 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
     res.json({
       totalUsers, totalPackages, pkgOffice, pkgTransit, pkgDelivered,
-      period: { usersDay, usersWeek, usersMonth, usersYear, pkgDay, pkgWeek, pkgMonth, pkgYear },
+      period: {
+        usersDay, usersWeek, usersMonth, usersYear,
+        pkgDay, pkgWeek, pkgMonth, pkgYear,
+        weightDay: weightDay._sum.weight ?? 0,
+        weightWeek: weightWeek._sum.weight ?? 0,
+        weightMonth: weightMonth._sum.weight ?? 0,
+        weightYear: weightYear._sum.weight ?? 0,
+      },
       latestUsers: latestUsers.map(serializeUser),
     });
   });
@@ -142,11 +157,18 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       : {};
 
     const [users, total] = await Promise.all([
-      db.user.findMany({ where, orderBy: { id: "desc" }, skip, take: limit }),
+      db.user.findMany({
+        where, orderBy: { id: "desc" }, skip, take: limit,
+        include: { _count: { select: { packages: true } } },
+      }),
       db.user.count({ where }),
     ]);
 
-    res.json({ users: users.map(serializeUser), total, pages: Math.ceil(total / limit) });
+    res.json({
+      users: users.map(({ _count, ...u }) => ({ ...serializeUser(u), packages_count: _count.packages })),
+      total,
+      pages: Math.ceil(total / limit),
+    });
   });
 
   api.post("/users", requireApiAuth, async (req, res) => {
@@ -243,6 +265,17 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
         const packages = await db.package.findMany({ where: { id: { in: idList } } });
         await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
       }
+    }
+    res.json({ ok: true });
+  });
+
+  api.post("/users/:id/packages/delete", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const userId = Number(req.params.id);
+    const { ids } = req.body as { ids: number[] };
+    const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
+    if (idList.length > 0) {
+      await db.package.deleteMany({ where: { id: { in: idList }, user_id: userId } });
     }
     res.json({ ok: true });
   });

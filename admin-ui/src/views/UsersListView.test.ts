@@ -42,11 +42,12 @@ afterEach(() => {
 describe("UsersListView", () => {
   it("loads and renders users on mount", async () => {
     vi.mocked(api.get).mockResolvedValue(
-      usersPage({ users: [{ id: 1, client_code: "DIX-0001", full_name: "Иван", phone: "500100500", created_at: "2026-01-01T00:00:00Z" }], total: 1 })
+      usersPage({ users: [{ id: 1, client_code: "DIX-0001", full_name: "Иван", phone: "500100500", created_at: "2026-01-01T00:00:00Z", packages_count: 4 }], total: 1 })
     );
     wrapper = mount(UsersListView, globalStubs);
     await flushPromises();
     expect(wrapper.text()).toContain("DIX-0001");
+    expect(wrapper.text()).toContain("4");
     expect(api.get).toHaveBeenCalledWith("/admin/users?page=1&q=");
   });
 

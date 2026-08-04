@@ -246,6 +246,132 @@ describe("UserDetailView — packages table", () => {
     const applyBtn = wrapper.find(".btn-primary.btn-sm");
     expect((applyBtn.element as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("deletes selected packages after confirmation and reloads", async () => {
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    vi.mocked(api.post).mockResolvedValue({ ok: true });
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type=checkbox]');
+    await checkboxes[1].setValue(true);
+
+    const deleteBtn = wrapper.findAll(".btn-outline-danger.btn-sm").find((b) => b.text() === "Удалить");
+    await deleteBtn!.trigger("click");
+    await flushPromises();
+
+    expect(api.post).toHaveBeenCalledWith("/admin/users/1/packages/delete", { ids: [10] });
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not delete selected packages when the confirmation is dismissed", async () => {
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(false));
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const checkboxes = wrapper.findAll('input[type=checkbox]');
+    await checkboxes[1].setValue(true);
+    const deleteBtn = wrapper.findAll(".btn-outline-danger.btn-sm").find((b) => b.text() === "Удалить");
+    await deleteBtn!.trigger("click");
+    await flushPromises();
+
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("disables the delete-selected button with no selection", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+    const deleteBtn = wrapper.findAll(".btn-outline-danger.btn-sm").find((b) => b.text() === "Удалить");
+    expect((deleteBtn!.element as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("UserDetailView — add package modal", () => {
+  function twoPackages(overrides: Record<string, unknown> = {}) {
+    return userDetail({
+      packages: [
+        { id: 10, track_code: "T1", status: "IN_TRANSIT", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+        { id: 11, track_code: "T2", status: "IN_OFFICE", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+      ],
+      tariff: 100,
+      ...overrides,
+    });
+  }
+
+  it("is hidden by default and opens from the footer button", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Новая посылка");
+    const addBtn = wrapper.findAll(".btn-outline.btn-sm").find((b) => b.text().includes("Добавить"));
+    await addBtn!.trigger("click");
+    expect(wrapper.text()).toContain("Новая посылка");
+  });
+
+  it("opens from the empty-state button when there are no packages", async () => {
+    vi.mocked(api.get).mockResolvedValue(userDetail());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Посылок нет");
+    const addBtn = wrapper.findAll("button").find((b) => b.text().includes("Добавить"));
+    await addBtn!.trigger("click");
+    expect(wrapper.text()).toContain("Новая посылка");
+  });
+
+  it("submits the new package for the current user and reloads", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    vi.mocked(api.post).mockResolvedValue({ package: {} });
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const addBtn = wrapper.findAll(".btn-outline.btn-sm").find((b) => b.text().includes("Добавить"));
+    await addBtn!.trigger("click");
+
+    await wrapper.find('input[placeholder="RU123456789CN"]').setValue("RU999");
+    const forms = wrapper.findAll("form");
+    await forms[forms.length - 1].trigger("submit.prevent");
+    await flushPromises();
+
+    expect(api.post).toHaveBeenCalledWith("/admin/packages", {
+      user_id: 1, track_code: "RU999", status: "IN_TRANSIT", weight: undefined, price: undefined,
+    });
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).not.toContain("Новая посылка");
+  });
+
+  it("auto-calculates price from weight using the tariff", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const addBtn = wrapper.findAll(".btn-outline.btn-sm").find((b) => b.text().includes("Добавить"));
+    await addBtn!.trigger("click");
+
+    const inputs = wrapper.findAll('input[type="number"]');
+    await inputs[0].setValue("3");
+    await flushPromises();
+    expect((inputs[1].element as HTMLInputElement).value).toBe("300.00");
+  });
+
+  it("closes without saving via the cancel button", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const addBtn = wrapper.findAll(".btn-outline.btn-sm").find((b) => b.text().includes("Добавить"));
+    await addBtn!.trigger("click");
+    expect(wrapper.text()).toContain("Новая посылка");
+
+    const cancelBtn = wrapper.findAll("button").find((b) => b.text() === "Отмена");
+    await cancelBtn!.trigger("click");
+    expect(wrapper.text()).not.toContain("Новая посылка");
+    expect(api.post).not.toHaveBeenCalled();
+  });
 });
 
 describe("UserDetailView — barcode scanner", () => {
