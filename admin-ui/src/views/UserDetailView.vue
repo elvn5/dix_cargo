@@ -307,7 +307,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
             <option value="IN_OFFICE">В офисе</option>
             <option value="DELIVERED">Выдан</option>
           </select>
-          <div v-if="bulkStatus === 'IN_OFFICE'" class="flex items-center gap-2">
+          <div v-if="bulkStatus === 'IN_OFFICE'" class="flex items-center gap-2 flex-wrap">
             <div class="flex items-center rounded-lg border border-slate-300 overflow-hidden">
               <span class="px-2 text-xs text-slate-500 bg-slate-50">Вес</span>
               <input v-model="bulkWeight" type="number" min="0" step="0.01" class="w-24 px-2 py-1.5 text-sm outline-none" placeholder="кг" />
@@ -318,6 +318,12 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
               <input v-model="bulkPrice" type="number" min="0" step="0.01" class="w-24 px-2 py-1.5 text-sm outline-none" placeholder="сом" />
               <span class="px-2 text-xs text-slate-500 bg-slate-50">сом</span>
             </div>
+            <span v-if="tariff > 0" class="text-xs text-slate-500" data-test="tariff-hint">
+              Тариф: <b>{{ tariff }} сом/кг</b>
+            </span>
+            <router-link v-else to="/settings" class="text-xs text-amber-600" data-test="tariff-missing">
+              Тариф не задан — цена не подставится
+            </router-link>
           </div>
           <button class="btn btn-primary btn-sm" :disabled="selectedCount === 0" @click="applyBulkStatus">
             <i class="bi bi-check2-all"></i> Применить к выбранным

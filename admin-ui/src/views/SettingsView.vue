@@ -6,7 +6,8 @@ import LoadingSpinner from "../components/LoadingSpinner.vue";
 
 pageTitle.value = "Настройки бота";
 
-const form = reactive({
+// tariff_per_kg приходит из <input type="number">, поэтому Vue хранит его как число
+const form = reactive<{ tariff_per_kg: string | number; forbidden_items: string; support_text: string }>({
   tariff_per_kg: "",
   forbidden_items: "",
   support_text: "",
@@ -37,7 +38,11 @@ function removeManager(index: number) {
 async function save() {
   submitting.value = true;
   try {
-    await api.put("/admin/settings", { ...form, managers: managers.value });
+    await api.put("/admin/settings", {
+      ...form,
+      tariff_per_kg: String(form.tariff_per_kg ?? "").trim(),
+      managers: managers.value,
+    });
     saved.value = true;
   } finally {
     submitting.value = false;

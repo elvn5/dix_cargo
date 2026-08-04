@@ -156,13 +156,14 @@ describe("UserDetailView — delete", () => {
 });
 
 describe("UserDetailView — packages table", () => {
-  function twoPackages() {
+  function twoPackages(overrides: Record<string, unknown> = {}) {
     return userDetail({
       packages: [
         { id: 10, track_code: "T1", status: "IN_TRANSIT", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
         { id: 11, track_code: "T2", status: "IN_OFFICE", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
       ],
       tariff: 100,
+      ...overrides,
     });
   }
 
@@ -196,6 +197,26 @@ describe("UserDetailView — packages table", () => {
 
     const priceInput = wrapper.find('input[placeholder="сом"]');
     expect((priceInput.element as HTMLInputElement).value).toBe("200.00");
+  });
+
+  it("shows the tariff next to the bulk price input", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoPackages());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    await wrapper.find("select").setValue("IN_OFFICE");
+    expect(wrapper.find('[data-test="tariff-hint"]').text()).toContain("100");
+    expect(wrapper.find('[data-test="tariff-missing"]').exists()).toBe(false);
+  });
+
+  it("warns when no tariff is configured", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoPackages({ tariff: 0 }));
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    await wrapper.find("select").setValue("IN_OFFICE");
+    expect(wrapper.find('[data-test="tariff-missing"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="tariff-hint"]').exists()).toBe(false);
   });
 
   it("applies a bulk status update and reloads", async () => {

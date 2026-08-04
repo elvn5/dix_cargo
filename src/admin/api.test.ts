@@ -360,6 +360,63 @@ describe("POST /users/:id/packages/status", () => {
     expect(bot.api.sendMessage).toHaveBeenCalledWith(555, expect.any(String), { parse_mode: "HTML" });
   });
 
+  it("computes the price from the tariff when only the weight is given", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
+      package: { findMany: vi.fn().mockResolvedValue([{ id: 9, track_code: "T1" }]) },
+      setting: { findUnique: vi.fn().mockResolvedValue({ key: "tariff_per_kg", value: "150" }) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_OFFICE", weight: 2.5 });
+
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [9] }, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 2.5, price: 375 },
+    });
+  });
+
+  it("keeps the price sent by the admin instead of the tariff calculation", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
+      package: { findMany: vi.fn().mockResolvedValue([{ id: 9, track_code: "T1" }]) },
+      setting: { findUnique: vi.fn().mockResolvedValue({ key: "tariff_per_kg", value: "150" }) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_OFFICE", weight: 2, price: 100 });
+
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [9] }, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 2, price: 100 },
+    });
+  });
+
+  it("leaves the price empty when no tariff is configured", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
+      package: { findMany: vi.fn().mockResolvedValue([{ id: 9, track_code: "T1" }]) },
+      setting: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_OFFICE", weight: 2 });
+
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [9] }, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 2 },
+    });
+  });
+
   it("does not notify for IN_TRANSIT", async () => {
     const bot = fakeBot();
     const db = fakeDb();
@@ -866,6 +923,19 @@ describe("settings routes", () => {
     const agent = await loginAgent(app);
     const res = await agent.get("/api/admin/settings");
     expect(res.body.settings.support_text).toBe("Наш новый текст");
+  });
+
+  it("PUT /settings saves the tariff sent as a number by the numeric input", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.put("/api/admin/settings").send({ tariff_per_kg: 150.5 });
+    expect(db.setting.upsert).toHaveBeenCalledWith({
+      where: { key: "tariff_per_kg" },
+      update: { value: "150.5" },
+      create: { key: "tariff_per_kg", value: "150.5" },
+    });
   });
 
   it("PUT /settings upserts the support text", async () => {
