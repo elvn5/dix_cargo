@@ -196,6 +196,21 @@ describe("menu commands", () => {
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("Айбек-Ата"), expect.any(Object));
   });
 
+  it("/addresses uses the text configured in the admin panel", async () => {
+    getPrismaMock.mockImplementation(() => fakeDb({
+      setting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockImplementation(({ where }: any) =>
+          where.key === "addresses_text" ? { key: "addresses_text", value: "Свой текст адресов" } : null),
+      },
+    }));
+    const bot = setupBot();
+    const handler = findHandler(bot, "command", "addresses");
+    const ctx = fakeCtx();
+    await handler(ctx);
+    expect(ctx.reply).toHaveBeenCalledWith("Свой текст адресов", expect.any(Object));
+  });
+
   it("/profile tells an unregistered user to /start", async () => {
     const bot = setupBot();
     const handler = findHandler(bot, "command", "profile");
