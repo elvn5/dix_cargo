@@ -7,10 +7,16 @@ import LoadingSpinner from "../components/LoadingSpinner.vue";
 pageTitle.value = "Настройки бота";
 
 // tariff_per_kg приходит из <input type="number">, поэтому Vue хранит его как число
-const form = reactive<{ tariff_per_kg: string | number; forbidden_items: string; support_text: string }>({
+const form = reactive<{
+  tariff_per_kg: string | number;
+  forbidden_items: string;
+  support_text: string;
+  addresses_text: string;
+}>({
   tariff_per_kg: "",
   forbidden_items: "",
   support_text: "",
+  addresses_text: "",
 });
 
 const managers = ref<{ name: string; url: string }[]>([]);
@@ -23,6 +29,7 @@ async function load() {
   form.tariff_per_kg = data.settings.tariff_per_kg ?? "";
   form.forbidden_items = data.settings.forbidden_items ?? "";
   form.support_text = data.settings.support_text ?? "";
+  form.addresses_text = data.settings.addresses_text ?? "";
   managers.value = data.managers.length ? data.managers.map(m => ({ ...m })) : [{ name: "", url: "" }];
   loading.value = false;
 }
@@ -113,6 +120,22 @@ onMounted(load);
             class="textarea font-mono"
             rows="8"
             data-test="support-text"
+            required
+          ></textarea>
+        </div>
+
+        <hr class="border-slate-200" />
+
+        <div>
+          <h2 class="font-bold mb-3">📍 Сообщение «Адреса»</h2>
+          <label class="text-xs text-slate-400 mb-1 block">
+            Поддерживает HTML-теги Telegram (&lt;b&gt;, &lt;i&gt;, &lt;a href="..."&gt;). Кнопки маркетплейсов добавляются автоматически.
+          </label>
+          <textarea
+            v-model="form.addresses_text"
+            class="textarea font-mono"
+            rows="8"
+            data-test="addresses-text"
             required
           ></textarea>
         </div>

@@ -83,6 +83,27 @@ describe("SettingsView", () => {
     );
   });
 
+  it("saves the edited addresses message", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      settings: { addresses_text: "старые адреса" },
+      managers: [{ name: "Аня", url: "https://wa.me/1" }],
+    });
+    vi.mocked(api.put).mockResolvedValue({ ok: true });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+
+    expect((wrapper.find('[data-test="addresses-text"]').element as HTMLTextAreaElement).value).toBe("старые адреса");
+
+    await wrapper.find('[data-test="addresses-text"]').setValue("новый текст адресов");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(api.put).toHaveBeenCalledWith(
+      "/admin/settings",
+      expect.objectContaining({ addresses_text: "новый текст адресов" }),
+    );
+  });
+
   it("adds and removes manager rows, allowing an unlimited number of buttons", async () => {
     vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [{ name: "Лидия", url: "https://wa.me/1" }] });
     const wrapper = mount(SettingsView);

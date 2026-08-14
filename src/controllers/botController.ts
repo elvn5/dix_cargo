@@ -3,6 +3,7 @@ import { userService } from "../services/userService";
 import { resetRequestService } from "../services/resetRequestService";
 import { getPrisma, DEFAULT_BRANCH, branchLabel, type Branch } from "../database/prismaClient";
 import { DEFAULT_SUPPORT_TEXT } from "../utils/supportText";
+import { DEFAULT_ADDRESSES_TEXT } from "../utils/addressesText";
 import type { PrismaClient } from "@prisma/client";
 import path from "path";
 import fs from "fs";
@@ -742,12 +743,12 @@ async function handleForbidden(ctx: Context) {
 }
 
 async function handleAddresses(ctx: Context) {
+  const db = await resolveDbForCtx(ctx);
+  const setting = await db.setting.findUnique({ where: { key: "addresses_text" } });
+  const text = setting?.value.trim() || DEFAULT_ADDRESSES_TEXT;
+
   await ctx.reply(
-    "📍 <b>Наши адреса</b>\n\n" +
-      "<b>Бишкек:</b>\n" +
-      "🏡 ул. Айбек-Ата, 1/2\n" +
-      "📞 +996 550‒86‒74‒14\n" +
-      "🕐 Пн–Сб: 9:00–19:00 (обед 13:00–14:00)",
+    text,
     {
       parse_mode: "HTML",
       reply_markup: {

@@ -972,6 +972,37 @@ describe("settings routes", () => {
     expect(res.body.settings.support_text).toBe("Наш новый текст");
   });
 
+  it("GET /settings falls back to the default addresses text and returns the saved one when present", async () => {
+    const db = fakeDb({
+      setting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/settings");
+    expect(res.body.settings.addresses_text).toContain("Айбек-Ата");
+
+    db.setting.findMany = vi.fn().mockResolvedValue([{ key: "addresses_text", value: "Наши новые адреса" }]);
+    const res2 = await agent.get("/api/admin/settings");
+    expect(res2.body.settings.addresses_text).toBe("Наши новые адреса");
+  });
+
+  it("PUT /settings upserts the addresses text", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.put("/api/admin/settings").send({ addresses_text: "📍 <b>Наши адреса</b>" });
+    expect(db.setting.upsert).toHaveBeenCalledWith({
+      where: { key: "addresses_text" },
+      update: { value: "📍 <b>Наши адреса</b>" },
+      create: { key: "addresses_text", value: "📍 <b>Наши адреса</b>" },
+    });
+  });
+
   it("PUT /settings saves the tariff sent as a number by the numeric input", async () => {
     const db = fakeDb();
     getPrismaMock.mockReturnValue(db);
