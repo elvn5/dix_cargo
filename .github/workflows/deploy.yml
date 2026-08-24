@@ -52,17 +52,16 @@ jobs:
           chmod 600 "$key_file"
 
           n=0
-          until [ "$n" -ge 5 ]; do
-            scp -i "$key_file" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
-              docker-compose.prod.yml "$SSH_USER@$SSH_HOST:/opt/cargo_bot_staging/docker-compose.prod.yml" && break
+          until scp -i "$key_file" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+              docker-compose.prod.yml "$SSH_USER@$SSH_HOST:/opt/cargo_bot_staging/docker-compose.prod.yml"; do
             n=$((n+1))
+            if [ "$n" -ge 5 ]; then
+              echo "scp failed after 5 attempts"
+              exit 1
+            fi
             echo "scp failed (attempt $n/5), retrying in 10s..."
             sleep 10
           done
-          if [ "$n" -ge 5 ]; then
-            echo "scp failed after 5 attempts"
-            exit 1
-          fi
 
       - name: Deploy staging on server
         uses: appleboy/ssh-action@v1.0.3
@@ -94,16 +93,15 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             n=0
-            until [ "$n" -ge 5 ]; do
-              docker compose -p cargo_staging -f docker-compose.prod.yml pull && break
+            until docker compose -p cargo_staging -f docker-compose.prod.yml pull; do
               n=$((n+1))
+              if [ "$n" -ge 5 ]; then
+                echo "docker compose pull failed after 5 attempts"
+                exit 1
+              fi
               echo "docker compose pull failed (attempt $n/5), retrying in 10s..."
               sleep 10
             done
-            if [ "$n" -ge 5 ]; then
-              echo "docker compose pull failed after 5 attempts"
-              exit 1
-            fi
 
             docker compose -p cargo_staging -f docker-compose.prod.yml up -d
             docker image prune -f
@@ -156,17 +154,16 @@ jobs:
           chmod 600 "$key_file"
 
           n=0
-          until [ "$n" -ge 5 ]; do
-            scp -i "$key_file" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
-              docker-compose.prod.yml "$SSH_USER@$SSH_HOST:/opt/cargo_bot_prod/docker-compose.prod.yml" && break
+          until scp -i "$key_file" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+              docker-compose.prod.yml "$SSH_USER@$SSH_HOST:/opt/cargo_bot_prod/docker-compose.prod.yml"; do
             n=$((n+1))
+            if [ "$n" -ge 5 ]; then
+              echo "scp failed after 5 attempts"
+              exit 1
+            fi
             echo "scp failed (attempt $n/5), retrying in 10s..."
             sleep 10
           done
-          if [ "$n" -ge 5 ]; then
-            echo "scp failed after 5 attempts"
-            exit 1
-          fi
 
       - name: Deploy production on server
         uses: appleboy/ssh-action@v1.0.3
@@ -198,16 +195,15 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             n=0
-            until [ "$n" -ge 5 ]; do
-              docker compose -p cargo_prod -f docker-compose.prod.yml pull && break
+            until docker compose -p cargo_prod -f docker-compose.prod.yml pull; do
               n=$((n+1))
+              if [ "$n" -ge 5 ]; then
+                echo "docker compose pull failed after 5 attempts"
+                exit 1
+              fi
               echo "docker compose pull failed (attempt $n/5), retrying in 10s..."
               sleep 10
             done
-            if [ "$n" -ge 5 ]; then
-              echo "docker compose pull failed after 5 attempts"
-              exit 1
-            fi
 
             docker compose -p cargo_prod -f docker-compose.prod.yml up -d
             docker image prune -f
