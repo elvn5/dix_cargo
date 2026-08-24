@@ -1,7 +1,7 @@
 function buildDixRegex(prefix: string): RegExp {
   const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Matches: "2222", "<PREFIX>2222", "<PREFIX>-2222", "<PREFIX> 2222" (case-insensitive)
-  return new RegExp(`^(?:${escaped}[-\\s]?)?(\\d{1,6})$`, "i");
+  // Matches: "<PREFIX>2222", "<PREFIX>-2222", "<PREFIX> 2222" (case-insensitive)
+  return new RegExp(`^${escaped}[-\\s]?(\\d{1,6})$`, "i");
 }
 
 /**
