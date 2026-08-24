@@ -2,13 +2,6 @@ import { describe, it, expect } from "vitest";
 import { parseClientCode } from "./parseClientCode";
 
 describe("parseClientCode", () => {
-  it("plain number — padded to 4 digits", () => {
-    expect(parseClientCode("2222")).toBe("DIX-2222");
-    expect(parseClientCode("8")).toBe("DIX-0008");
-    expect(parseClientCode("24")).toBe("DIX-0024");
-    expect(parseClientCode("1920")).toBe("DIX-1920");
-  });
-
   it("DIX with dash", () => {
     expect(parseClientCode("DIX-0022")).toBe("DIX-0022");
     expect(parseClientCode("DIX-22")).toBe("DIX-0022");
@@ -26,7 +19,6 @@ describe("parseClientCode", () => {
   });
 
   it("trims surrounding whitespace", () => {
-    expect(parseClientCode("  2222  ")).toBe("DIX-2222");
     expect(parseClientCode(" DIX-0042 ")).toBe("DIX-0042");
   });
 
@@ -39,8 +31,14 @@ describe("parseClientCode", () => {
     expect(parseClientCode("JT5485640575332")).toBeNull();
   });
 
+  it("returns null for a bare number without a prefix", () => {
+    expect(parseClientCode("2222")).toBeNull();
+    expect(parseClientCode("8")).toBeNull();
+    expect(parseClientCode("1920", "KADIX")).toBeNull();
+  });
+
   it("supports a custom prefix (Кант — KADIX)", () => {
-    expect(parseClientCode("2222", "KADIX")).toBe("KADIX-2222");
+    expect(parseClientCode("KADIX2222", "KADIX")).toBe("KADIX-2222");
     expect(parseClientCode("KADIX-0022", "KADIX")).toBe("KADIX-0022");
     expect(parseClientCode("KADIX 22", "KADIX")).toBe("KADIX-0022");
     expect(parseClientCode("kadix-9999", "KADIX")).toBe("KADIX-9999");
