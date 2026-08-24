@@ -19,6 +19,7 @@ describe("parseClientCode", () => {
   });
 
   it("trims surrounding whitespace", () => {
+    expect(parseClientCode("  2222  ")).toBe("DIX-2222");
     expect(parseClientCode(" DIX-0042 ")).toBe("DIX-0042");
   });
 
@@ -31,10 +32,12 @@ describe("parseClientCode", () => {
     expect(parseClientCode("JT5485640575332")).toBeNull();
   });
 
-  it("returns null for a bare number without a prefix", () => {
-    expect(parseClientCode("2222")).toBeNull();
-    expect(parseClientCode("8")).toBeNull();
-    expect(parseClientCode("1920", "KADIX")).toBeNull();
+  it("plain number — padded to 4 digits, resolved against the given prefix", () => {
+    expect(parseClientCode("2222")).toBe("DIX-2222");
+    expect(parseClientCode("8")).toBe("DIX-0008");
+    expect(parseClientCode("24")).toBe("DIX-0024");
+    expect(parseClientCode("1920")).toBe("DIX-1920");
+    expect(parseClientCode("1920", "KADIX")).toBe("KADIX-1920");
   });
 
   it("supports a custom prefix (Кант — KADIX)", () => {
