@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useAuthStore, type Branch } from "../stores/auth";
 import { pageTitle } from "../composables/pageTitle";
+import { api } from "../api/client";
 
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 const sidebarOpen = ref(false);
+const pendingResetRequests = ref(0);
 
 const navItems = [
   { to: "/", label: "Дашборд", icon: "bi-speedometer2", exact: true },
@@ -17,6 +20,35 @@ const navItems = [
   { to: "/marketplaces", label: "Маркетплейсы", icon: "bi-shop" },
   { to: "/settings", label: "Настройки бота", icon: "bi-gear" },
 ];
+
+let pendingResetRequestsTimer: ReturnType<typeof setInterval> | undefined;
+
+async function loadPendingResetRequests() {
+  try {
+    const data = await api.get<{ requests: { status: string }[] }>("/admin/reset-requests");
+    pendingResetRequests.value = data.requests.filter((r) => r.status === "PENDING").length;
+  } catch {
+    // не критично — просто не покажем badge
+  }
+}
+
+onMounted(() => {
+  loadPendingResetRequests();
+  pendingResetRequestsTimer = setInterval(loadPendingResetRequests, 30000);
+});
+
+onUnmounted(() => {
+  clearInterval(pendingResetRequestsTimer);
+});
+
+watch(
+  () => route.name,
+  (_name, previousName) => {
+    if (route.name === "reset-requests" || previousName === "reset-requests") {
+      loadPendingResetRequests();
+    }
+  },
+);
 
 async function switchBranch(branch: Branch) {
   await auth.setBranch(branch);
@@ -72,12 +104,16 @@ async function logout() {
           v-for="item in navItems"
           :key="item.to"
           :to="item.to"
-          class="px-3 py-2.5 rounded-lg text-sm text-white/70 hover:bg-slate-700 hover:text-white transition-colors"
+          class="relative px-3 py-2.5 rounded-lg text-sm text-white/70 hover:bg-slate-700 hover:text-white transition-colors"
           active-class="bg-indigo-600 text-white font-semibold hover:bg-indigo-600"
           :exact-active-class="item.exact ? 'bg-indigo-600 text-white font-semibold hover:bg-indigo-600' : undefined"
           @click="sidebarOpen = false"
         >
           <i class="bi" :class="item.icon"></i> {{ item.label }}
+          <span
+            v-if="item.to === '/reset-requests' && pendingResetRequests > 0"
+            class="absolute top-1.5 right-2.5 h-2 w-2 rounded-full bg-red-500"
+          ></span>
         </router-link>
       </div>
 
