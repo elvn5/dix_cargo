@@ -8,7 +8,8 @@ vi.mock("../api/client", async (importOriginal) => {
 });
 
 const push = vi.fn();
-vi.mock("vue-router", () => ({ useRouter: () => ({ push }) }));
+const route = { name: "dashboard" };
+vi.mock("vue-router", () => ({ useRouter: () => ({ push }), useRoute: () => route }));
 
 import AdminLayout from "./AdminLayout.vue";
 import { useAuthStore } from "../stores/auth";
@@ -18,9 +19,10 @@ const globalStubs = { global: { stubs: { RouterLink: { template: "<a><slot/></a>
 
 beforeEach(() => {
   setActivePinia(createPinia());
-  vi.mocked(api.get).mockReset();
+  vi.mocked(api.get).mockReset().mockResolvedValue({ requests: [] });
   vi.mocked(api.post).mockReset().mockResolvedValue(undefined);
   push.mockReset();
+  route.name = "dashboard";
 });
 
 describe("AdminLayout", () => {
@@ -81,6 +83,25 @@ describe("AdminLayout", () => {
 
     expect(api.post).toHaveBeenCalledWith("/admin/logout");
     expect(push).toHaveBeenCalledWith({ name: "login" });
+  });
+
+  it("shows a red badge on the reset-requests nav item when there is a pending request", async () => {
+    vi.mocked(api.get).mockResolvedValue({ requests: [{ status: "PENDING" }, { status: "APPROVED" }] });
+    const wrapper = mount(AdminLayout, globalStubs);
+    await flushPromises();
+
+    expect(api.get).toHaveBeenCalledWith("/admin/reset-requests");
+    const resetLink = wrapper.findAll("a").find((a) => a.text().includes("Заявки на сброс"))!;
+    expect(resetLink.find(".bg-red-500").exists()).toBe(true);
+  });
+
+  it("does not show a badge when there are no pending reset requests", async () => {
+    vi.mocked(api.get).mockResolvedValue({ requests: [{ status: "APPROVED" }, { status: "REJECTED" }] });
+    const wrapper = mount(AdminLayout, globalStubs);
+    await flushPromises();
+
+    const resetLink = wrapper.findAll("a").find((a) => a.text().includes("Заявки на сброс"))!;
+    expect(resetLink.find(".bg-red-500").exists()).toBe(false);
   });
 
   it("toggles the mobile sidebar", async () => {
