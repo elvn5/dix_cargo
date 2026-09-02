@@ -481,15 +481,20 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
     const wb = XLSX.read(req.file.buffer, { type: "buffer" });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
+    // Код клиента читаем как ОТОБРАЖАЕМЫЙ текст ячейки (raw: false): в складских файлах
+    // код задан числом с пользовательским форматом "DIX-"0000 — т.е. 114 показывается как
+    // "DIX-0114". Трек-код берём из «сырых» значений, чтобы длинные номера не превратились
+    // в экспоненциальную запись при форматировании.
+    const codeRows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false }) as unknown[][];
+    const rawRows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: true }) as unknown[][];
 
     const items: ImportPlanItem[] = [];
     const planned = new Set<string>();
     let unrecognized = 0;
 
-    for (const row of rows) {
-      const rawCode = (row as unknown[])[2];
-      const trackCode = String((row as unknown[])[3] ?? "").trim();
+    for (let i = 0; i < rawRows.length; i++) {
+      const rawCode = (codeRows[i] as unknown[] | undefined)?.[2];
+      const trackCode = String((rawRows[i] as unknown[] | undefined)?.[3] ?? "").trim();
       const clientCode = parseClientCode(rawCode, codePrefix);
       if (!clientCode || !trackCode) { unrecognized++; continue; }
 
