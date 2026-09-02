@@ -46,7 +46,7 @@ async function submit() {
     <div class="card p-6">
       <p class="text-sm text-slate-500 mb-4">
         Колонка <b>C</b> — код клиента. Форматы:
-        <code>{{ codePrefix }}2222</code>, <code>{{ codePrefix }}-2222</code>, <code>{{ codePrefix }} 2222</code>.<br />
+        <code>2222</code>, <code>{{ codePrefix }}2222</code>, <code>{{ codePrefix }}-2222</code>, <code>{{ codePrefix }} 2222</code>.<br />
         Колонка <b>D</b> — трек-номер.<br />
         Строки без распознанного кода в колонке C пропускаются.<br />
         Дата отправки извлекается из имени файла (формат: <code>4月18号…</code>).<br />
