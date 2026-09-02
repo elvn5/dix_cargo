@@ -932,6 +932,28 @@ describe("POST /packages/import", () => {
     expect(res.body.items[1]).toMatchObject({ action: "skip", reason: "duplicate" });
     expect(db.package.create).toHaveBeenCalledTimes(1);
   });
+
+  it("reads the client code by its DISPLAYED text (custom number format \"DIX-\"0000)", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ id: 7, client_code: "DIX-0114" });
+    const db = fakeDb({ user: { findUnique }, package: { findFirst: vi.fn().mockResolvedValue(null) } });
+    getPrismaMock.mockReturnValue(db);
+
+    // Ячейка кода — число 114 с форматом "DIX-"0000: в Excel показывается как "DIX-0114".
+    const ws = XLSX.utils.aoa_to_sheet([["", "", 114, "TRACK1"]]);
+    ws["C1"].z = '"DIX-"0000';
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/packages/import").attach("file", buf, "import.xlsx");
+
+    // код взят из отображаемого текста, а не из сырого числа 114
+    expect(findUnique).toHaveBeenCalledWith({ where: { client_code: "DIX-0114" } });
+    expect(res.body.imported).toBe(1);
+    expect(db.package.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── Промокоды ────────────────────────────────────────────────────────────────
