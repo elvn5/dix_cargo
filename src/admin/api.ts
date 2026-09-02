@@ -454,11 +454,27 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
   const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+  // Строим план импорта (без записи в БД): что будет добавлено, а что пропущено и почему.
+  // Тот же расчёт используется и для превью (dryRun), и для реального импорта — так превью
+  // совпадает с тем, что будет применено. Дубликаты внутри самого файла тоже отсеиваются.
+  type ImportPlanItem = {
+    clientCode: string;
+    trackCode: string;
+    userName: string | null;
+    action: "import" | "skip";
+    reason?: "user_not_found" | "duplicate";
+    userId?: number;
+  };
+
+  const MAX_PREVIEW_ITEMS = 500;
+
   api.post("/packages/import", requireApiAuth, importUpload.single("file"), async (req, res) => {
     const branch = getBranch(req);
     const db = getPrisma(branch);
     const codePrefix = clientCodePrefix(branch);
     if (!req.file) return res.status(400).json({ error: "file_required" });
+
+    const dryRun = req.query.dryRun === "1" || req.query.dryRun === "true";
 
     const filename = Buffer.from(req.file.originalname, "latin1").toString("utf8");
     const shippingDate = parseShippingDate(filename);
@@ -467,28 +483,60 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
 
-    let imported = 0, skipped = 0;
-    const errors: string[] = [];
+    const items: ImportPlanItem[] = [];
+    const planned = new Set<string>();
+    let unrecognized = 0;
 
     for (const row of rows) {
       const rawCode = (row as unknown[])[2];
       const trackCode = String((row as unknown[])[3] ?? "").trim();
       const clientCode = parseClientCode(rawCode, codePrefix);
-      if (!clientCode || !trackCode) continue;
+      if (!clientCode || !trackCode) { unrecognized++; continue; }
 
       const user = await db.user.findUnique({ where: { client_code: clientCode } });
-      if (!user) { errors.push(`${clientCode}: пользователь не найден`); skipped++; continue; }
+      if (!user) { items.push({ clientCode, trackCode, userName: null, action: "skip", reason: "user_not_found" }); continue; }
 
-      const exists = await db.package.findFirst({ where: { user_id: user.id, track_code: trackCode } });
-      if (exists) { skipped++; continue; }
+      const dupKey = `${user.id}:${trackCode}`;
+      const exists = planned.has(dupKey) || await db.package.findFirst({ where: { user_id: user.id, track_code: trackCode } });
+      if (exists) { items.push({ clientCode, trackCode, userName: user.full_name ?? null, action: "skip", reason: "duplicate" }); continue; }
 
+      planned.add(dupKey);
+      items.push({ clientCode, trackCode, userName: user.full_name ?? null, action: "import", userId: user.id });
+    }
+
+    const importItems = items.filter((i) => i.action === "import");
+    const toImport = importItems.length;
+    const toSkip = items.length - toImport;
+    const errors = items
+      .filter((i) => i.reason === "user_not_found")
+      .map((i) => `${i.clientCode}: пользователь не найден`);
+    // Публичная форма плана — без внутреннего userId.
+    const previewItems = items.slice(0, MAX_PREVIEW_ITEMS).map(({ userId: _userId, ...rest }) => rest);
+    const summary = {
+      shippingDate: shippingDate.toISOString(),
+      toImport,
+      toSkip,
+      unrecognized,
+      items: previewItems,
+      itemsTruncated: items.length > MAX_PREVIEW_ITEMS,
+      errors: errors.slice(0, 10),
+    };
+
+    // Превью: ничего не пишем, отдаём план изменений.
+    if (dryRun) {
+      return res.json({ dryRun: true, imported: 0, skipped: toSkip, ...summary });
+    }
+
+    // Применение: создаём только строки с action === "import".
+    let imported = 0;
+    for (const it of importItems) {
       await db.package.create({
-        data: { user_id: user.id, track_code: trackCode, status: "IN_TRANSIT", created_at: shippingDate },
+        data: { user_id: it.userId!, track_code: it.trackCode, status: "IN_TRANSIT", created_at: shippingDate },
       });
       imported++;
     }
 
-    res.json({ imported, skipped, errors: errors.slice(0, 10) });
+    res.json({ dryRun: false, imported, skipped: toSkip, ...summary });
   });
 
   api.get("/packages/:id", requireApiAuth, async (req, res) => {

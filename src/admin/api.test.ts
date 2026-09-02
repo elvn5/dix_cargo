@@ -872,6 +872,66 @@ describe("POST /packages/import", () => {
     expect(res.body.skipped).toBe(0);
     expect(findUnique).not.toHaveBeenCalled();
   });
+
+  it("dryRun=1 returns a preview plan and writes nothing", async () => {
+    const db = fakeDb({
+      user: {
+        findUnique: vi.fn()
+          .mockResolvedValueOnce({ id: 1, client_code: "DIX-0001", full_name: "Иван" }) // known
+          .mockResolvedValueOnce(null),                                                                    // unknown
+      },
+      package: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const rows = [
+      ["", "", "DIX-0001", "TRACK1"],
+      ["", "", "DIX-9999", "TRACK2"],
+      ["", "", "", ""],
+    ];
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent
+      .post("/api/admin/packages/import?dryRun=1")
+      .attach("file", xlsxBuffer(rows), "import.xlsx");
+
+    expect(res.body.dryRun).toBe(true);
+    expect(res.body.imported).toBe(0);
+    expect(res.body.toImport).toBe(1);
+    expect(res.body.toSkip).toBe(1);
+    expect(res.body.unrecognized).toBe(1);
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0]).toMatchObject({ clientCode: "DIX-0001", trackCode: "TRACK1", action: "import" });
+    expect(res.body.items[1]).toMatchObject({ clientCode: "DIX-9999", action: "skip", reason: "user_not_found" });
+    expect(res.body.errors[0]).toContain("DIX-9999");
+    // nothing is persisted during a preview
+    expect(db.package.create).not.toHaveBeenCalled();
+  });
+
+  it("skips a duplicate track that repeats within the same file", async () => {
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", full_name: "A" }) },
+      package: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const rows = [
+      ["", "", "DIX-0001", "TRACK1"],
+      ["", "", "DIX-0001", "TRACK1"], // same client + track -> only imported once
+    ];
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer(rows), "import.xlsx");
+
+    expect(res.body.imported).toBe(1);
+    expect(res.body.skipped).toBe(1);
+    expect(res.body.items[1]).toMatchObject({ action: "skip", reason: "duplicate" });
+    expect(db.package.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── Промокоды ────────────────────────────────────────────────────────────────
