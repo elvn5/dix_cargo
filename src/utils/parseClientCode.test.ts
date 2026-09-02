@@ -19,8 +19,8 @@ describe("parseClientCode", () => {
   });
 
   it("trims surrounding whitespace", () => {
-    expect(parseClientCode("  2222  ")).toBe("DIX-2222");
     expect(parseClientCode(" DIX-0042 ")).toBe("DIX-0042");
+    expect(parseClientCode("  DIX-2222  ")).toBe("DIX-2222");
   });
 
   it("returns null for non-code values", () => {
@@ -32,12 +32,12 @@ describe("parseClientCode", () => {
     expect(parseClientCode("JT5485640575332")).toBeNull();
   });
 
-  it("plain number — padded to 4 digits, resolved against the given prefix", () => {
-    expect(parseClientCode("2222")).toBe("DIX-2222");
-    expect(parseClientCode("8")).toBe("DIX-0008");
-    expect(parseClientCode("24")).toBe("DIX-0024");
-    expect(parseClientCode("1920")).toBe("DIX-1920");
-    expect(parseClientCode("1920", "KADIX")).toBe("KADIX-1920");
+  it("plain number without a prefix is rejected (branch prefix is required)", () => {
+    expect(parseClientCode("2222")).toBeNull();
+    expect(parseClientCode("8")).toBeNull();
+    expect(parseClientCode("  1920  ")).toBeNull();
+    expect(parseClientCode("2222", "KADIX")).toBeNull();
+    expect(parseClientCode("1920", "KADIX")).toBeNull();
   });
 
   it("supports a custom prefix (Кант — KADIX)", () => {
@@ -46,5 +46,18 @@ describe("parseClientCode", () => {
     expect(parseClientCode("KADIX 22", "KADIX")).toBe("KADIX-0022");
     expect(parseClientCode("kadix-9999", "KADIX")).toBe("KADIX-9999");
     expect(parseClientCode("DIX-2222", "KADIX")).toBeNull();
+  });
+
+  it("keeps branches separate: a code of one branch never resolves for the other", () => {
+    // DIX-**** must never be accepted for Кант (KADIX)
+    expect(parseClientCode("DIX-2222", "KADIX")).toBeNull();
+    expect(parseClientCode("DIX2222", "KADIX")).toBeNull();
+    expect(parseClientCode("DIX 2222", "KADIX")).toBeNull();
+    expect(parseClientCode("dix-0007", "KADIX")).toBeNull();
+    // KADIX-**** must never be accepted for Бишкек (DIX)
+    expect(parseClientCode("KADIX-2222", "DIX")).toBeNull();
+    expect(parseClientCode("KADIX2222", "DIX")).toBeNull();
+    expect(parseClientCode("KADIX 2222", "DIX")).toBeNull();
+    expect(parseClientCode("kadix-0007", "DIX")).toBeNull();
   });
 });
