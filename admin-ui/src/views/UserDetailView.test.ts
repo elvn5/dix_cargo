@@ -219,6 +219,36 @@ describe("UserDetailView — packages table", () => {
     expect(wrapper.find('[data-test="tariff-hint"]').exists()).toBe(false);
   });
 
+  it("shows total weight and payable sum of the selected packages when status is DELIVERED", async () => {
+    vi.mocked(api.get).mockResolvedValue(
+      userDetail({
+        tariff: 100,
+        packages: [
+          { id: 10, track_code: "T1", status: "IN_OFFICE", weight: 2, price: 200, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+          { id: 11, track_code: "T2", status: "IN_OFFICE", weight: 1.5, price: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+          { id: 12, track_code: "T3", status: "IN_OFFICE", weight: null, price: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+        ],
+      }),
+    );
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    // No summary until DELIVERED is chosen with a selection
+    await wrapper.find("select").setValue("DELIVERED");
+    expect(wrapper.find('[data-test="delivered-summary"]').exists()).toBe(false);
+
+    const checkboxes = wrapper.findAll("input[type=checkbox]");
+    await checkboxes[0].setValue(true); // select all three
+    await flushPromises();
+
+    // Weight = 2 + 1.5 = 3.5 (T3 has no weight)
+    expect(wrapper.find('[data-test="delivered-weight"]').text()).toBe("3.5");
+    // Sum = 200 (stored) + 1.5*100 (by tariff) = 350
+    expect(wrapper.find('[data-test="delivered-price"]').text()).toBe("350");
+    // One selected package has no weight
+    expect(wrapper.find('[data-test="delivered-missing"]').text()).toContain("1");
+  });
+
   it("applies a bulk status update and reloads", async () => {
     vi.mocked(api.get).mockResolvedValue(twoPackages());
     vi.mocked(api.post).mockResolvedValue({ ok: true });

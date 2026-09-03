@@ -22,6 +22,8 @@ interface PackageRow {
   id: number;
   track_code: string;
   status: "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
+  weight: number | null;
+  price: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +51,30 @@ const cbAllRef = ref<HTMLInputElement | null>(null);
 const selectedCount = computed(() => selected.size);
 const allChecked = computed(() => packages.value.length > 0 && selected.size === packages.value.length);
 const indeterminate = computed(() => selected.size > 0 && selected.size < packages.value.length);
+
+// Итог по выбранным посылкам для статуса "Выдан": суммарный вес и сумма к оплате по тарифу
+const deliveredSummary = computed(() => {
+  let totalWeight = 0;
+  let totalPrice = 0;
+  let missingWeight = 0;
+  for (const p of packages.value) {
+    if (!selected.has(p.id)) continue;
+    if (typeof p.weight === "number") totalWeight += p.weight;
+    else missingWeight++;
+    const price =
+      typeof p.price === "number"
+        ? p.price
+        : typeof p.weight === "number" && tariff.value > 0
+          ? p.weight * tariff.value
+          : 0;
+    totalPrice += price;
+  }
+  return {
+    totalWeight: Number(totalWeight.toFixed(2)),
+    totalPrice: Number(totalPrice.toFixed(2)),
+    missingWeight,
+  };
+});
 
 watch([allChecked, indeterminate], () => {
   if (cbAllRef.value) cbAllRef.value.indeterminate = indeterminate.value;
@@ -378,6 +404,29 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
             <router-link v-else to="/settings" class="text-xs text-amber-600" data-test="tariff-missing">
               Тариф не задан — цена не подставится
             </router-link>
+          </div>
+          <div
+            v-if="bulkStatus === 'DELIVERED' && selectedCount > 0"
+            class="flex items-center gap-2 flex-wrap"
+            data-test="delivered-summary"
+          >
+            <div class="flex items-center rounded-lg border border-slate-300 overflow-hidden">
+              <span class="px-2 text-xs text-slate-500 bg-slate-50">Вес</span>
+              <span class="px-3 py-1.5 text-sm font-semibold" data-test="delivered-weight">{{ deliveredSummary.totalWeight }}</span>
+              <span class="px-2 text-xs text-slate-500 bg-slate-50">кг</span>
+            </div>
+            <div class="flex items-center rounded-lg border border-slate-300 overflow-hidden">
+              <span class="px-2 text-xs text-slate-500 bg-slate-50">К оплате</span>
+              <span class="px-3 py-1.5 text-sm font-semibold" data-test="delivered-price">{{ deliveredSummary.totalPrice }}</span>
+              <span class="px-2 text-xs text-slate-500 bg-slate-50">сом</span>
+            </div>
+            <span
+              v-if="deliveredSummary.missingWeight > 0"
+              class="text-xs text-amber-600"
+              data-test="delivered-missing"
+            >
+              Без веса: {{ deliveredSummary.missingWeight }}
+            </span>
           </div>
           <button class="btn btn-primary btn-sm" :disabled="selectedCount === 0" @click="applyBulkStatus">
             <i class="bi bi-check2-all"></i> Применить к выбранным
