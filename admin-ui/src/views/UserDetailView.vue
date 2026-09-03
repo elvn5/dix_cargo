@@ -22,8 +22,6 @@ interface PackageRow {
   id: number;
   track_code: string;
   status: "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED";
-  weight: number | null;
-  price: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -44,39 +42,20 @@ const editForm = reactive({ client_code: "", full_name: "", phone: "" });
 
 const selected = reactive(new Set<number>());
 const bulkStatus = ref<"IN_TRANSIT" | "IN_OFFICE" | "DELIVERED">("IN_TRANSIT");
-// Индивидуальные вес/цена по каждой посылке (строковые значения из инпутов, ключ — id посылки)
-const edits = reactive<Record<number, { weight: string; price: string }>>({});
+const bulkWeight = ref("");
+const bulkPrice = ref("");
 const cbAllRef = ref<HTMLInputElement | null>(null);
 
 const selectedCount = computed(() => selected.size);
 const allChecked = computed(() => packages.value.length > 0 && selected.size === packages.value.length);
 const indeterminate = computed(() => selected.size > 0 && selected.size < packages.value.length);
 
-// Итог по выбранным посылкам: сумма индивидуальных весов и сумма к оплате.
-// Считаем по текущим (возможно ещё не сохранённым) значениям из строк таблицы.
-const selectedSummary = computed(() => {
-  let totalWeight = 0;
-  let totalPrice = 0;
-  let missingWeight = 0;
-  for (const p of packages.value) {
-    if (!selected.has(p.id)) continue;
-    const e = edits[p.id];
-    const w = e && e.weight !== "" ? parseFloat(e.weight) : NaN;
-    if (!Number.isNaN(w)) totalWeight += w;
-    else missingWeight++;
-    let price = e && e.price !== "" ? parseFloat(e.price) : NaN;
-    if (Number.isNaN(price)) price = !Number.isNaN(w) && tariff.value > 0 ? w * tariff.value : 0;
-    if (!Number.isNaN(price)) totalPrice += price;
-  }
-  return {
-    totalWeight: Number(totalWeight.toFixed(2)),
-    totalPrice: Number(totalPrice.toFixed(2)),
-    missingWeight,
-  };
-});
-
 watch([allChecked, indeterminate], () => {
   if (cbAllRef.value) cbAllRef.value.indeterminate = indeterminate.value;
+});
+
+watch(bulkWeight, (w) => {
+  if (tariff.value > 0 && w !== "") bulkPrice.value = (parseFloat(w) * tariff.value).toFixed(2);
 });
 
 function toggleAll(checked: boolean) {
@@ -97,14 +76,6 @@ async function load() {
     editForm.full_name = data.user.full_name;
     editForm.phone = data.user.phone;
     packages.value = data.packages;
-    // Заполняем поля веса/цены из данных посылок
-    for (const key of Object.keys(edits)) delete edits[Number(key)];
-    for (const p of data.packages) {
-      edits[p.id] = {
-        weight: p.weight != null ? String(p.weight) : "",
-        price: p.price != null ? String(p.price) : "",
-      };
-    }
     tariff.value = data.tariff;
     pageTitle.value = data.user.full_name;
   } catch (e) {
@@ -138,29 +109,17 @@ async function deleteUser() {
   router.push("/users");
 }
 
-// Автоподстановка цены по тарифу при вводе веса в строке (цену можно перебить вручную)
-function onRowWeight(id: number, value: string) {
-  const e = edits[id];
-  if (!e) return;
-  e.weight = value;
-  if (tariff.value > 0 && value !== "") e.price = (parseFloat(value) * tariff.value).toFixed(2);
-}
-
 async function applyBulkStatus() {
   if (selected.size === 0) return;
-  const items = [...selected].map((id) => {
-    const e = edits[id];
-    return {
-      id,
-      weight: e && e.weight !== "" ? e.weight : undefined,
-      price: e && e.price !== "" ? e.price : undefined,
-    };
-  });
   await api.post(`/admin/users/${userId.value}/packages/status`, {
+    ids: [...selected],
     status: bulkStatus.value,
-    items,
+    weight: bulkWeight.value || undefined,
+    price: bulkPrice.value || undefined,
   });
   selected.clear();
+  bulkWeight.value = "";
+  bulkPrice.value = "";
   pkgSavedMsg.value = true;
   await load();
 }
@@ -373,8 +332,6 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
                 </th>
                 <th>Трек-номер</th>
                 <th>Статус</th>
-                <th class="w-28">Вес (кг)</th>
-                <th class="w-28">Цена (сом)</th>
                 <th>Дата отправки</th>
                 <th>Дата поступления</th>
               </tr>
@@ -391,29 +348,6 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
                 </td>
                 <td class="font-mono text-xs">{{ p.track_code }}</td>
                 <td><span class="badge" :class="STATUS_BADGE[p.status]">{{ STATUS_LABEL[p.status] }}</span></td>
-                <td>
-                  <input
-                    v-if="edits[p.id]"
-                    :value="edits[p.id].weight"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    class="w-24 px-2 py-1 text-sm rounded-lg border border-slate-300 outline-none focus:border-indigo-400"
-                    placeholder="кг"
-                    @input="onRowWeight(p.id, ($event.target as HTMLInputElement).value)"
-                  />
-                </td>
-                <td>
-                  <input
-                    v-if="edits[p.id]"
-                    v-model="edits[p.id].price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    class="w-24 px-2 py-1 text-sm rounded-lg border border-slate-300 outline-none focus:border-indigo-400"
-                    placeholder="сом"
-                  />
-                </td>
                 <td class="text-slate-400 text-xs">{{ fmtDate(p.created_at) }}</td>
                 <td class="text-slate-400 text-xs">{{ fmtDate(p.updated_at) }}</td>
               </tr>
@@ -427,29 +361,17 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
             <option value="IN_OFFICE">В офисе</option>
             <option value="DELIVERED">Выдан</option>
           </select>
-          <div
-            v-if="(bulkStatus === 'IN_OFFICE' || bulkStatus === 'DELIVERED') && selectedCount > 0"
-            class="flex items-center gap-2 flex-wrap"
-            data-test="selected-summary"
-          >
-            <span class="text-xs text-slate-400">Итог:</span>
+          <div v-if="bulkStatus === 'IN_OFFICE'" class="flex items-center gap-2 flex-wrap">
             <div class="flex items-center rounded-lg border border-slate-300 overflow-hidden">
               <span class="px-2 text-xs text-slate-500 bg-slate-50">Вес</span>
-              <span class="px-3 py-1.5 text-sm font-semibold" data-test="summary-weight">{{ selectedSummary.totalWeight }}</span>
+              <input v-model="bulkWeight" type="number" min="0" step="0.01" class="w-24 px-2 py-1.5 text-sm outline-none" placeholder="кг" />
               <span class="px-2 text-xs text-slate-500 bg-slate-50">кг</span>
             </div>
             <div class="flex items-center rounded-lg border border-slate-300 overflow-hidden">
-              <span class="px-2 text-xs text-slate-500 bg-slate-50">К оплате</span>
-              <span class="px-3 py-1.5 text-sm font-semibold" data-test="summary-price">{{ selectedSummary.totalPrice }}</span>
+              <span class="px-2 text-xs text-slate-500 bg-slate-50">Цена</span>
+              <input v-model="bulkPrice" type="number" min="0" step="0.01" class="w-24 px-2 py-1.5 text-sm outline-none" placeholder="сом" />
               <span class="px-2 text-xs text-slate-500 bg-slate-50">сом</span>
             </div>
-            <span
-              v-if="selectedSummary.missingWeight > 0"
-              class="text-xs text-amber-600"
-              data-test="summary-missing"
-            >
-              Без веса: {{ selectedSummary.missingWeight }}
-            </span>
             <span v-if="tariff > 0" class="text-xs text-slate-500" data-test="tariff-hint">
               Тариф: <b>{{ tariff }} сом/кг</b>
             </span>
