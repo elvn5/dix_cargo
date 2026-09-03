@@ -199,12 +199,15 @@ describe("UserDetailView — packages table", () => {
     expect((priceInput.element as HTMLInputElement).value).toBe("200.00");
   });
 
-  it("shows the tariff next to the bulk price input", async () => {
+  it("shows the tariff in the selected-summary when status is IN_OFFICE", async () => {
     vi.mocked(api.get).mockResolvedValue(twoPackages());
     wrapper = mount(UserDetailView, globalStubs);
     await flushPromises();
 
     await wrapper.find("select").setValue("IN_OFFICE");
+    const checkboxes = wrapper.findAll("input[type=checkbox]");
+    await checkboxes[1].setValue(true);
+    await flushPromises();
     expect(wrapper.find('[data-test="tariff-hint"]').text()).toContain("100");
     expect(wrapper.find('[data-test="tariff-missing"]').exists()).toBe(false);
   });
@@ -215,11 +218,14 @@ describe("UserDetailView — packages table", () => {
     await flushPromises();
 
     await wrapper.find("select").setValue("IN_OFFICE");
+    const checkboxes = wrapper.findAll("input[type=checkbox]");
+    await checkboxes[1].setValue(true);
+    await flushPromises();
     expect(wrapper.find('[data-test="tariff-missing"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="tariff-hint"]').exists()).toBe(false);
   });
 
-  it("shows total weight and payable sum of the selected packages when status is DELIVERED", async () => {
+  it("shows the total weight and payable sum of the selected packages", async () => {
     vi.mocked(api.get).mockResolvedValue(
       userDetail({
         tariff: 100,
@@ -233,20 +239,20 @@ describe("UserDetailView — packages table", () => {
     wrapper = mount(UserDetailView, globalStubs);
     await flushPromises();
 
-    // No summary until DELIVERED is chosen with a selection
+    // No summary until a status with weight is chosen with a selection
     await wrapper.find("select").setValue("DELIVERED");
-    expect(wrapper.find('[data-test="delivered-summary"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="selected-summary"]').exists()).toBe(false);
 
     const checkboxes = wrapper.findAll("input[type=checkbox]");
     await checkboxes[0].setValue(true); // select all three
     await flushPromises();
 
     // Weight = 2 + 1.5 = 3.5 (T3 has no weight)
-    expect(wrapper.find('[data-test="delivered-weight"]').text()).toBe("3.5");
+    expect(wrapper.find('[data-test="summary-weight"]').text()).toBe("3.5");
     // Sum = 200 (stored) + 1.5*100 (by tariff) = 350
-    expect(wrapper.find('[data-test="delivered-price"]').text()).toBe("350");
+    expect(wrapper.find('[data-test="summary-price"]').text()).toBe("350");
     // One selected package has no weight
-    expect(wrapper.find('[data-test="delivered-missing"]').text()).toContain("1");
+    expect(wrapper.find('[data-test="summary-missing"]').text()).toContain("1");
   });
 
   it("applies a bulk status update and reloads", async () => {
@@ -258,13 +264,16 @@ describe("UserDetailView — packages table", () => {
     const checkboxes = wrapper.findAll('input[type=checkbox]');
     await checkboxes[1].setValue(true);
     await wrapper.find("select").setValue("IN_OFFICE");
+    // Первая строка (id 10) — свой индивидуальный вес
     await wrapper.find('input[placeholder="кг"]').setValue("2");
+    await flushPromises();
 
     await wrapper.find(".btn-primary.btn-sm").trigger("click");
     await flushPromises();
 
     expect(api.post).toHaveBeenCalledWith("/admin/users/1/packages/status", {
-      ids: [10], status: "IN_OFFICE", weight: 2, price: "200.00",
+      status: "IN_OFFICE",
+      items: [{ id: 10, weight: "2", price: "200.00" }],
     });
     expect(api.get).toHaveBeenCalledTimes(2);
   });

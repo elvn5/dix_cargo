@@ -36,6 +36,13 @@ function numOrNull(raw: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Сумма заданных значений; null — если ни одного числа нет. */
+function sumOrNull(vals: (number | null | undefined)[]): number | null {
+  const nums = vals.filter((v): v is number => typeof v === "number");
+  if (nums.length === 0) return null;
+  return Number(nums.reduce((a, b) => a + b, 0).toFixed(2));
+}
+
 /** Тариф филиала в сомах за кг; 0 — если не задан. */
 async function loadTariff(db: ReturnType<typeof getPrisma>): Promise<number> {
   const setting = await db.setting.findUnique({ where: { key: "tariff_per_kg" } });
@@ -239,42 +246,54 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
   api.post("/users/:id/packages/status", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const userId = Number(req.params.id);
-    const { ids, status, weight, price } = req.body as {
-      ids: number[]; status: string; weight?: string | number; price?: string | number;
+    const { ids, status, items } = req.body as {
+      ids?: number[];
+      status: string;
+      items?: { id: number; weight?: string | number; price?: string | number }[];
     };
     const validStatuses = ["IN_TRANSIT", "IN_OFFICE", "DELIVERED"];
     if (!validStatuses.includes(status)) return res.status(400).json({ error: "invalid_status" });
 
-    const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
-    if (idList.length > 0) {
-      // Введённые вес и цена — это ИТОГ по всей выделенной группе посылок.
-      const wTotal = numOrNull(weight);
-      // Если вес указан, а цена нет — считаем её по тарифу филиала (тоже итог по группе)
-      let pTotal = numOrNull(price);
-      if (wTotal !== null && pTotal === null) {
-        const tariff = await loadTariff(db);
-        if (tariff > 0) pTotal = Number((wTotal * tariff).toFixed(2));
+    // Каждая посылка обновляется со своим индивидуальным весом и ценой.
+    // Если пришёл только список id (например, для статуса "В пути") — вес/цена не трогаем.
+    const rawItems: { id: number; weight?: string | number; price?: string | number }[] =
+      Array.isArray(items) && items.length > 0
+        ? items
+        : (Array.isArray(ids) ? ids : ids != null ? [ids] : []).map((id) => ({ id: Number(id) }));
+
+    const tariff = await loadTariff(db);
+
+    const normalized = rawItems
+      .map((it) => {
+        const id = Number(it.id);
+        const weight = numOrNull(it.weight);
+        // Если вес указан, а цена нет — считаем цену по тарифу филиала для ЭТОЙ посылки.
+        let price = numOrNull(it.price);
+        if (weight !== null && price === null && tariff > 0) {
+          price = Number((weight * tariff).toFixed(2));
+        }
+        return { id, weight, price };
+      })
+      .filter((it) => Number.isFinite(it.id) && it.id > 0);
+
+    if (normalized.length > 0) {
+      for (const it of normalized) {
+        const data: Record<string, unknown> = { status };
+        if (it.weight !== null) data.weight = it.weight;
+        if (it.price !== null) data.price = it.price;
+        await db.package.updateMany({
+          where: { id: it.id, user_id: userId },
+          data: data as { status: "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED"; weight?: number; price?: number },
+        });
       }
 
-      // В каждой посылке храним её долю, чтобы суммы по любому набору посылок
-      // (страница выдачи, дашборд, экспорт) не задваивались.
-      const n = idList.length;
-      const wShare = wTotal !== null ? Number((wTotal / n).toFixed(2)) : null;
-      const pShare = pTotal !== null ? Number((pTotal / n).toFixed(2)) : null;
-
-      const data: Record<string, unknown> = { status };
-      if (wShare !== null) data.weight = wShare;
-      if (pShare !== null) data.price = pShare;
-
-      await db.package.updateMany({
-        where: { id: { in: idList }, user_id: userId },
-        data: data as { status: "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED"; weight?: number; price?: number },
-      });
-
       if (status === "IN_OFFICE" || status === "DELIVERED") {
+        const idList = normalized.map((it) => it.id);
         const user = await db.user.findUnique({ where: { id: userId } });
-        const packages = await db.package.findMany({ where: { id: { in: idList } } });
-        // В уведомлении клиенту показываем итог по группе, а не долю одной посылки
+        const packages = await db.package.findMany({ where: { id: { in: idList }, user_id: userId } });
+        // Итог по группе для уведомления = сумма индивидуальных весов и цен выбранных посылок.
+        const wTotal = sumOrNull(packages.map((pkg) => pkg.weight));
+        const pTotal = sumOrNull(packages.map((pkg) => pkg.price));
         await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", wTotal, pTotal);
       }
     }

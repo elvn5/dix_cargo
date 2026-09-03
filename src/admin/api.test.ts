@@ -395,11 +395,11 @@ describe("POST /users/:id/packages/status", () => {
 
     const app = buildApp(bot);
     const agent = await loginAgent(app);
-    const res = await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_OFFICE", weight: "2.5", price: "375" });
+    const res = await agent.post("/api/admin/users/1/packages/status").send({ status: "IN_OFFICE", items: [{ id: 9, weight: "2.5", price: "375" }] });
 
     expect(res.body).toEqual({ ok: true });
     expect(db.package.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [9] }, user_id: 1 },
+      where: { id: 9, user_id: 1 },
       data: { status: "IN_OFFICE", weight: 2.5, price: 375 },
     });
     expect(bot.api.sendMessage).toHaveBeenCalledWith(555, expect.any(String), { parse_mode: "HTML" });
@@ -416,10 +416,10 @@ describe("POST /users/:id/packages/status", () => {
 
     const app = buildApp(bot);
     const agent = await loginAgent(app);
-    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_OFFICE", weight: 2.5 });
+    await agent.post("/api/admin/users/1/packages/status").send({ status: "IN_OFFICE", items: [{ id: 9, weight: 2.5 }] });
 
     expect(db.package.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [9] }, user_id: 1 },
+      where: { id: 9, user_id: 1 },
       data: { status: "IN_OFFICE", weight: 2.5, price: 375 },
     });
   });
@@ -435,10 +435,10 @@ describe("POST /users/:id/packages/status", () => {
 
     const app = buildApp(bot);
     const agent = await loginAgent(app);
-    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_OFFICE", weight: 2, price: 100 });
+    await agent.post("/api/admin/users/1/packages/status").send({ status: "IN_OFFICE", items: [{ id: 9, weight: 2, price: 100 }] });
 
     expect(db.package.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [9] }, user_id: 1 },
+      where: { id: 9, user_id: 1 },
       data: { status: "IN_OFFICE", weight: 2, price: 100 },
     });
   });
@@ -454,39 +454,49 @@ describe("POST /users/:id/packages/status", () => {
 
     const app = buildApp(bot);
     const agent = await loginAgent(app);
-    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_OFFICE", weight: 2 });
+    await agent.post("/api/admin/users/1/packages/status").send({ status: "IN_OFFICE", items: [{ id: 9, weight: 2 }] });
 
     expect(db.package.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [9] }, user_id: 1 },
+      where: { id: 9, user_id: 1 },
       data: { status: "IN_OFFICE", weight: 2 },
     });
   });
 
-  it("splits the group total weight and price across the selected packages", async () => {
+  it("saves an individual weight and price for each selected package", async () => {
     const bot = fakeBot();
     const db = fakeDb({
       user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
-      package: { findMany: vi.fn().mockResolvedValue([{ id: 9, track_code: "T1" }, { id: 10, track_code: "T2" }]) },
+      // findMany (для уведомления) отдаёт уже сохранённые индивидуальные веса/цены
+      package: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 9, track_code: "T1", weight: 3, price: 300 },
+          { id: 10, track_code: "T2", weight: 7, price: 700 },
+        ]),
+      },
     });
     getPrismaMock.mockReturnValue(db);
 
     const app = buildApp(bot);
     const agent = await loginAgent(app);
-    // Итог по группе: 10 кг / 2376 сом на 2 посылки → по 5 кг / 1188 сом каждой
     const res = await agent
       .post("/api/admin/users/1/packages/status")
-      .send({ ids: [9, 10], status: "IN_OFFICE", weight: "10", price: "2376" });
+      .send({ status: "IN_OFFICE", items: [{ id: 9, weight: "3", price: "300" }, { id: 10, weight: "7", price: "700" }] });
 
     expect(res.body).toEqual({ ok: true });
+    // Каждой посылке — её собственный вес/цена, без деления на группу
     expect(db.package.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [9, 10] }, user_id: 1 },
-      data: { status: "IN_OFFICE", weight: 5, price: 1188 },
+      where: { id: 9, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 3, price: 300 },
     });
-    // В уведомлении клиенту — итог по группе (10 кг), а не доля одной посылки
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 7, price: 700 },
+    });
+    // В уведомлении клиенту — итог по группе = сумма индивидуальных весов (3 + 7 = 10 кг)
     expect(bot.api.sendMessage).toHaveBeenCalledWith(555, expect.stringContaining("10 кг"), { parse_mode: "HTML" });
   });
 
-  it("splits the tariff-derived group price across the selected packages", async () => {
+  it("derives each package price from the tariff independently", async () => {
     const bot = fakeBot();
     const db = fakeDb({
       user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
@@ -497,12 +507,31 @@ describe("POST /users/:id/packages/status", () => {
 
     const app = buildApp(bot);
     const agent = await loginAgent(app);
-    // Вес 10 (итог) → цена по тарифу 100 = 1000 (итог) → на 2 посылки по 5 кг / 500 сом
-    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9, 10], status: "IN_OFFICE", weight: 10 });
+    // Вес 3 → 300 сом, вес 7 → 700 сом (каждая посылка считается по тарифу отдельно)
+    await agent
+      .post("/api/admin/users/1/packages/status")
+      .send({ status: "IN_OFFICE", items: [{ id: 9, weight: 3 }, { id: 10, weight: 7 }] });
 
     expect(db.package.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [9, 10] }, user_id: 1 },
-      data: { status: "IN_OFFICE", weight: 5, price: 500 },
+      where: { id: 9, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 3, price: 300 },
+    });
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 7, price: 700 },
+    });
+  });
+
+  it("still accepts a plain id list for a status-only change", async () => {
+    const bot = fakeBot();
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "IN_TRANSIT" });
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: 9, user_id: 1 },
+      data: { status: "IN_TRANSIT" },
     });
   });
 
