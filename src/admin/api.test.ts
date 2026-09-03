@@ -213,6 +213,28 @@ describe("GET /dashboard", () => {
     expect(res.body.period.weightYear).toBe(12.5);
   });
 
+  it("aggregates period weight by updated_at (weighing time), not created_at", async () => {
+    const aggregate = vi.fn().mockResolvedValue({ _sum: { weight: 5 } });
+    const db = fakeDb({
+      user: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]) },
+      package: { count: vi.fn().mockResolvedValue(0), aggregate },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/dashboard");
+
+    expect(res.status).toBe(200);
+    // One aggregate call per period (day/week/month/year), all filtered by updated_at
+    expect(aggregate).toHaveBeenCalledTimes(4);
+    for (const call of aggregate.mock.calls) {
+      expect(call[0].where.updated_at.gte).toBeInstanceOf(Date);
+      expect(call[0].where.created_at).toBeUndefined();
+      expect(call[0].where.weight).toEqual({ not: null });
+    }
+  });
+
   it("defaults period weights to 0 when there are no packages", async () => {
     const db = fakeDb();
     getPrismaMock.mockReturnValue(db);

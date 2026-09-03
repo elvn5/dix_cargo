@@ -95,8 +95,11 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const soy = new Date(now.getFullYear(), 0, 1);
     const since = (d: Date) => ({ gte: d });
 
+    // Вес присваивается посылке позже создания — на этапе "В офисе" (меняется updated_at).
+    // Поэтому вес за период считаем по времени взвешивания (updated_at), а не по created_at,
+    // иначе за день/неделю/месяц сумма всегда 0, а число появляется только за год.
     const sumWeight = (d: Date) =>
-      db.package.aggregate({ where: { created_at: since(d) }, _sum: { weight: true } });
+      db.package.aggregate({ where: { updated_at: since(d), weight: { not: null } }, _sum: { weight: true } });
 
     const [
       totalUsers, totalPackages,
