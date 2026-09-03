@@ -13,6 +13,7 @@ const router = createRouter({
     { path: "/packages/import", name: "packages-import", component: () => import("../views/PackagesImportView.vue") },
     { path: "/packages/new", name: "package-new", component: () => import("../views/PackageNewView.vue") },
     { path: "/packages/:id", name: "package-detail", component: () => import("../views/PackageDetailView.vue"), props: true },
+    { path: "/delivery", name: "delivery", component: () => import("../views/DeliveryView.vue") },
     { path: "/promocodes", name: "promocodes", component: () => import("../views/PromoCodesView.vue") },
     { path: "/reset-requests", name: "reset-requests", component: () => import("../views/ResetRequestsView.vue") },
     { path: "/settings", name: "settings", component: () => import("../views/SettingsView.vue") },
