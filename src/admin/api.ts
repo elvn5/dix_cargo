@@ -247,17 +247,24 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
     const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
     if (idList.length > 0) {
-      const w = numOrNull(weight);
-      // Если вес указан, а цена нет — считаем её по тарифу филиала
-      let p = numOrNull(price);
-      if (w !== null && p === null) {
+      // Введённые вес и цена — это ИТОГ по всей выделенной группе посылок.
+      const wTotal = numOrNull(weight);
+      // Если вес указан, а цена нет — считаем её по тарифу филиала (тоже итог по группе)
+      let pTotal = numOrNull(price);
+      if (wTotal !== null && pTotal === null) {
         const tariff = await loadTariff(db);
-        if (tariff > 0) p = Number((w * tariff).toFixed(2));
+        if (tariff > 0) pTotal = Number((wTotal * tariff).toFixed(2));
       }
 
+      // В каждой посылке храним её долю, чтобы суммы по любому набору посылок
+      // (страница выдачи, дашборд, экспорт) не задваивались.
+      const n = idList.length;
+      const wShare = wTotal !== null ? Number((wTotal / n).toFixed(2)) : null;
+      const pShare = pTotal !== null ? Number((pTotal / n).toFixed(2)) : null;
+
       const data: Record<string, unknown> = { status };
-      if (w !== null) data.weight = w;
-      if (p !== null) data.price = p;
+      if (wShare !== null) data.weight = wShare;
+      if (pShare !== null) data.price = pShare;
 
       await db.package.updateMany({
         where: { id: { in: idList }, user_id: userId },
@@ -267,7 +274,8 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       if (status === "IN_OFFICE" || status === "DELIVERED") {
         const user = await db.user.findUnique({ where: { id: userId } });
         const packages = await db.package.findMany({ where: { id: { in: idList } } });
-        await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", w, p);
+        // В уведомлении клиенту показываем итог по группе, а не долю одной посылки
+        await notifyStatusChange(bot, db, userId, user?.client_code ?? "—", packages.map(pkg => pkg.track_code), status as "IN_OFFICE" | "DELIVERED", wTotal, pTotal);
       }
     }
     res.json({ ok: true });

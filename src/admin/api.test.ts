@@ -462,6 +462,50 @@ describe("POST /users/:id/packages/status", () => {
     });
   });
 
+  it("splits the group total weight and price across the selected packages", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
+      package: { findMany: vi.fn().mockResolvedValue([{ id: 9, track_code: "T1" }, { id: 10, track_code: "T2" }]) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    // Итог по группе: 10 кг / 2376 сом на 2 посылки → по 5 кг / 1188 сом каждой
+    const res = await agent
+      .post("/api/admin/users/1/packages/status")
+      .send({ ids: [9, 10], status: "IN_OFFICE", weight: "10", price: "2376" });
+
+    expect(res.body).toEqual({ ok: true });
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [9, 10] }, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 5, price: 1188 },
+    });
+    // В уведомлении клиенту — итог по группе (10 кг), а не доля одной посылки
+    expect(bot.api.sendMessage).toHaveBeenCalledWith(555, expect.stringContaining("10 кг"), { parse_mode: "HTML" });
+  });
+
+  it("splits the tariff-derived group price across the selected packages", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
+      package: { findMany: vi.fn().mockResolvedValue([{ id: 9, track_code: "T1" }, { id: 10, track_code: "T2" }]) },
+      setting: { findUnique: vi.fn().mockResolvedValue({ key: "tariff_per_kg", value: "100" }) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    // Вес 10 (итог) → цена по тарифу 100 = 1000 (итог) → на 2 посылки по 5 кг / 500 сом
+    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9, 10], status: "IN_OFFICE", weight: 10 });
+
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [9, 10] }, user_id: 1 },
+      data: { status: "IN_OFFICE", weight: 5, price: 500 },
+    });
+  });
+
   it("does not notify for IN_TRANSIT", async () => {
     const bot = fakeBot();
     const db = fakeDb();
