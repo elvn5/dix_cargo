@@ -359,7 +359,6 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
           <select v-model="bulkStatus" class="select w-auto">
             <option value="IN_TRANSIT">В пути</option>
             <option value="IN_OFFICE">В офисе</option>
-            <option value="DELIVERED">Выдан</option>
           </select>
           <div v-if="bulkStatus === 'IN_OFFICE'" class="flex items-center gap-2 flex-wrap">
             <div class="flex items-center rounded-lg border border-slate-300 overflow-hidden">

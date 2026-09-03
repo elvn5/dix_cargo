@@ -15,6 +15,7 @@ const navItems = [
   { to: "/", label: "Дашборд", icon: "bi-speedometer2", exact: true },
   { to: "/users", label: "Пользователи", icon: "bi-people" },
   { to: "/packages", label: "Посылки", icon: "bi-box-seam" },
+  { to: "/delivery", label: "Выдача", icon: "bi-bag-check" },
   { to: "/promocodes", label: "Промокоды", icon: "bi-ticket-perforated" },
   { to: "/reset-requests", label: "Заявки на сброс", icon: "bi-person-lock" },
   { to: "/marketplaces", label: "Маркетплейсы", icon: "bi-shop" },
