@@ -1252,3 +1252,53 @@ describe("marketplaces routes", () => {
   });
 
 });
+
+// ── Рассылка ─────────────────────────────────────────────────────────────────
+
+describe("broadcast routes", () => {
+  it("GET /broadcast/audience returns the count of real bot users", async () => {
+    const db = fakeDb({ user: { count: vi.fn().mockResolvedValue(7) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/broadcast/audience");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ count: 7 });
+    expect(db.user.count).toHaveBeenCalledWith({ where: { telegram_id: { gt: 0 } } });
+  });
+
+  it("POST /broadcast rejects an empty message with no files", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/broadcast").field("text", "   ");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("empty");
+  });
+
+  it("POST /broadcast sanitizes the text and sends it to every real user", async () => {
+    const db = fakeDb({
+      user: {
+        findMany: vi.fn().mockResolvedValue([{ telegram_id: 111n }, { telegram_id: 222n }]),
+        count: vi.fn().mockResolvedValue(2),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const bot = fakeBot();
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+
+    const res = await agent.post("/api/admin/broadcast").field("text", "<div>hello</div><b>x</b>");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ total: 2, sent: 2, failed: 0 });
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(2);
+    expect(bot.api.sendMessage).toHaveBeenCalledWith(111, "hello<b>x</b>", { parse_mode: "HTML" });
+  });
+
+  it("POST /broadcast requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).post("/api/admin/broadcast").field("text", "hi");
+    expect(res.status).toBe(401);
+  });
+});
