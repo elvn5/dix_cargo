@@ -15,6 +15,7 @@ import { DEFAULT_SUPPORT_TEXT } from "../utils/supportText";
 import { DEFAULT_ADDRESSES_TEXT } from "../utils/addressesText";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, APP_VERSION, IS_STAGING, getBranch, requireApiAuth } from "./auth";
 import { notifyStatusChange, notifyResetDecision } from "./notify";
+import { sanitizeTelegramHtml, plainTextLength, sendBroadcast, TG_MESSAGE_LIMIT, type BroadcastFile } from "./broadcast";
 
 // ── Сериализация ──────────────────────────────────────────────────────────────
 
@@ -800,6 +801,38 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       }
     }
     res.json({ ok: true });
+  });
+
+  // ── Рассылка сообщений пользователям ─────────────────────────────────────────
+
+  const broadcastUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024, files: 10 },
+  });
+
+  // Сколько реальных пользователей бота получат рассылку в текущем филиале.
+  api.get("/broadcast/audience", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const count = await db.user.count({ where: { telegram_id: { gt: 0 } } });
+    res.json({ count });
+  });
+
+  api.post("/broadcast", requireApiAuth, broadcastUpload.array("files", 10), async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const text = sanitizeTelegramHtml(String((req.body as { text?: string }).text ?? "").trim());
+    const uploaded = (req.files as Express.Multer.File[] | undefined) ?? [];
+    const files: BroadcastFile[] = uploaded.map((f) => ({
+      buffer: f.buffer,
+      // multer отдаёт имя файла в latin1 — приводим к utf8, как в импорте посылок
+      filename: Buffer.from(f.originalname, "latin1").toString("utf8"),
+      mimetype: f.mimetype,
+    }));
+
+    if (!text && files.length === 0) return res.status(400).json({ error: "empty" });
+    if (plainTextLength(text) > TG_MESSAGE_LIMIT) return res.status(400).json({ error: "too_long" });
+
+    const result = await sendBroadcast(bot, db, { text, files });
+    res.json(result);
   });
 
   app.use("/api/admin", api);

@@ -20,6 +20,7 @@ const navItems = [
   { to: "/reset-requests", label: "Заявки на сброс", icon: "bi-person-lock" },
   { to: "/marketplaces", label: "Маркетплейсы", icon: "bi-shop" },
   { to: "/settings", label: "Настройки бота", icon: "bi-gear" },
+  { to: "/broadcast", label: "Отправить сообщение", icon: "bi-send" },
 ];
 
 let pendingResetRequestsTimer: ReturnType<typeof setInterval> | undefined;
