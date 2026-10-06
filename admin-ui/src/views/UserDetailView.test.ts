@@ -437,3 +437,74 @@ describe("UserDetailView — barcode scanner", () => {
     expect(wrapper.text()).not.toContain("не найден");
   });
 });
+
+describe("UserDetailView — trash, deliveries and duplicates", () => {
+  it("shows a trash banner and restores the user", async () => {
+    vi.mocked(api.get).mockResolvedValue(userDetail({
+      user: { ...userDetail().user, deleted_at: "2026-10-06T04:00:00Z" },
+    }));
+    vi.mocked(api.post).mockResolvedValue({ ok: true });
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="trash-banner"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("В корзину");
+    await wrapper.find('[data-test="restore-user"]').trigger("click");
+    await flushPromises();
+    expect(api.post).toHaveBeenCalledWith("/admin/trash/1/restore");
+  });
+
+  it("moves the user to the trash after confirmation", async () => {
+    vi.mocked(api.get).mockResolvedValue(userDetail());
+    vi.mocked(api.delete).mockResolvedValue({ ok: true });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const btn = wrapper.findAll("button").find((b) => b.text().includes("В корзину"));
+    await btn!.trigger("click");
+    await flushPromises();
+    // window.confirm мог быть замокан в соседних тестах — ищем наш вызов среди всех
+    expect(confirmSpy.mock.calls.some(([msg]) => String(msg).includes("в корзину"))).toBe(true);
+    expect(api.delete).toHaveBeenCalledWith("/admin/users/1");
+    confirmSpy.mockRestore();
+  });
+
+  it("lists deliveries with their total weight and price", async () => {
+    vi.mocked(api.get).mockResolvedValue(userDetail({
+      deliveries: [{
+        id: 7, weight: 2.35, price: 558.36, created_at: "2026-10-05T10:00:00Z",
+        packages: [{ id: 10, track_code: "T1" }, { id: 11, track_code: "T2" }],
+      }],
+    }));
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const block = wrapper.find('[data-test="deliveries"]');
+    expect(block.exists()).toBe(true);
+    expect(block.text()).toContain("2.35 кг");
+    expect(block.text()).toContain("T1");
+    expect(block.text()).toContain("T2");
+  });
+
+  it("shows the duplicate modal when adding a package with an existing track code", async () => {
+    vi.mocked(api.get).mockResolvedValue(userDetail());
+    vi.mocked(api.post).mockRejectedValue(new ApiError(409, "duplicate_track", {
+      error: "duplicate_track",
+      existing: { id: 5, track_code: "T9", status: "IN_TRANSIT", user_id: 2, client_code: "DIX-0002", full_name: "Б", in_trash: true },
+    }));
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+
+    const addBtn = wrapper.findAll("button").find((b) => b.text().includes("Добавить"));
+    await addBtn!.trigger("click");
+    await wrapper.find('input[placeholder="RU123456789CN"]').setValue("T9");
+    await wrapper.findAll("form")[1].trigger("submit.prevent");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="duplicate-modal"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="duplicate-in-trash"]').exists()).toBe(true);
+    // Форма добавления остаётся открытой, чтобы исправить трек-код
+    expect(wrapper.text()).toContain("Новая посылка");
+  });
+});

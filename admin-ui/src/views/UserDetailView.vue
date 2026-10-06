@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
 import LoadingSpinner from "../components/LoadingSpinner.vue";
+import DuplicateTrackModal from "../components/DuplicateTrackModal.vue";
+import { duplicateTrackFrom, type DuplicateTrack } from "../utils/duplicateTrack";
 
 const route = useRoute();
 const router = useRouter();
@@ -17,6 +19,14 @@ interface UserData {
   telegram_id: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
+}
+interface DeliveryRow {
+  id: number;
+  weight: number | null;
+  price: number | null;
+  created_at: string;
+  packages: { id: number; track_code: string }[];
 }
 interface PackageRow {
   id: number;
@@ -29,8 +39,9 @@ interface PackageRow {
 const STATUS_LABEL: Record<string, string> = { IN_OFFICE: "В офисе", IN_TRANSIT: "В пути", DELIVERED: "Выдан" };
 const STATUS_BADGE: Record<string, string> = { IN_OFFICE: "badge-warning", IN_TRANSIT: "badge-primary", DELIVERED: "badge-success" };
 
-const user = reactive<UserData>({ id: 0, client_code: "", full_name: "", phone: "", telegram_id: "", created_at: "", updated_at: "" });
+const user = reactive<UserData>({ id: 0, client_code: "", full_name: "", phone: "", telegram_id: "", created_at: "", updated_at: "", deleted_at: null });
 const packages = ref<PackageRow[]>([]);
+const deliveries = ref<DeliveryRow[]>([]);
 const tariff = ref(0);
 const loading = ref(true);
 
@@ -70,12 +81,13 @@ function toggleOne(id: number, checked: boolean) {
 async function load() {
   loading.value = true;
   try {
-    const data = await api.get<{ user: UserData; packages: PackageRow[]; tariff: number }>(`/admin/users/${userId.value}`);
+    const data = await api.get<{ user: UserData; packages: PackageRow[]; tariff: number; deliveries?: DeliveryRow[] }>(`/admin/users/${userId.value}`);
     Object.assign(user, data.user);
     editForm.client_code = data.user.client_code;
     editForm.full_name = data.user.full_name;
     editForm.phone = data.user.phone;
     packages.value = data.packages;
+    deliveries.value = data.deliveries ?? [];
     tariff.value = data.tariff;
     pageTitle.value = data.user.full_name;
   } catch (e) {
@@ -104,9 +116,14 @@ async function saveUser() {
 }
 
 async function deleteUser() {
-  if (!confirm(`Удалить пользователя ${user.full_name}?`)) return;
+  if (!confirm(`Переместить пользователя ${user.full_name} в корзину вместе с его посылками?\nВосстановить можно в разделе «Корзина».`)) return;
   await api.delete(`/admin/users/${userId.value}`);
   router.push("/users");
+}
+
+async function restoreUser() {
+  await api.post(`/admin/trash/${userId.value}/restore`);
+  await load();
 }
 
 async function applyBulkStatus() {
@@ -136,6 +153,7 @@ async function deleteSelected() {
 const showAddModal = ref(false);
 const addForm = reactive({ trackCode: "", status: "IN_TRANSIT" as "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED", weight: "", price: "" });
 const addSubmitting = ref(false);
+const duplicate = ref<DuplicateTrack | null>(null);
 
 watch(() => addForm.weight, (w) => {
   if (tariff.value > 0 && w !== "") addForm.price = (parseFloat(w) * tariff.value).toFixed(2);
@@ -170,6 +188,10 @@ async function submitAddPackage() {
     });
     showAddModal.value = false;
     await load();
+  } catch (e) {
+    const dup = duplicateTrackFrom(e);
+    if (!dup) throw e;
+    duplicate.value = dup;
   } finally {
     addSubmitting.value = false;
   }
@@ -240,6 +262,15 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 <template>
   <LoadingSpinner v-if="loading" />
   <template v-else>
+    <div v-if="user.deleted_at" class="alert alert-warning flex items-center gap-3 flex-wrap" data-test="trash-banner">
+      <span>
+        <i class="bi bi-trash"></i> Клиент в корзине с {{ new Date(user.deleted_at).toLocaleString("ru-RU") }} —
+        он и его посылки скрыты из списков и бота.
+      </span>
+      <button class="btn btn-primary btn-sm ml-auto" data-test="restore-user" @click="restoreUser">
+        <i class="bi bi-arrow-counterclockwise"></i> Восстановить
+      </button>
+    </div>
     <div v-if="savedMsg" class="alert alert-success">Изменения сохранены.</div>
     <div v-if="editError" class="alert alert-danger">{{ editError }}</div>
 
@@ -284,11 +315,12 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
             </div>
           </dl>
         </div>
-        <div class="card p-6 mt-4 border-red-200!">
+        <div v-if="!user.deleted_at" class="card p-6 mt-4 border-red-200!">
           <div class="text-red-600 font-semibold mb-2 text-sm">Опасная зона</div>
           <button class="btn btn-outline-danger btn-sm w-full" @click="deleteUser">
-            <i class="bi bi-trash"></i> Удалить пользователя
+            <i class="bi bi-trash"></i> В корзину
           </button>
+          <div class="text-xs text-slate-400 mt-2">Клиент и его посылки попадут в корзину, откуда их можно восстановить.</div>
         </div>
       </div>
     </div>
@@ -390,6 +422,39 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
         </div>
       </template>
     </div>
+
+    <div v-if="deliveries.length > 0" class="card mt-6" data-test="deliveries">
+      <div class="card-header">
+        <span class="font-semibold">Выдачи <span class="badge badge-neutral">{{ deliveries.length }}</span></span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>№</th><th>Дата</th><th>Посылки</th><th>Вес</th><th>Цена</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in deliveries" :key="d.id">
+              <td class="text-slate-400 text-xs">{{ d.id }}</td>
+              <td class="text-xs">{{ new Date(d.created_at).toLocaleString("ru-RU") }}</td>
+              <td>
+                <div class="flex flex-wrap gap-1">
+                  <router-link
+                    v-for="gp in d.packages"
+                    :key="gp.id"
+                    :to="`/packages/${gp.id}`"
+                    class="font-mono text-xs text-indigo-600 hover:underline"
+                  >{{ gp.track_code }}</router-link>
+                </div>
+              </td>
+              <td class="whitespace-nowrap">{{ d.weight != null ? d.weight + " кг" : "—" }}</td>
+              <td class="whitespace-nowrap">{{ d.price != null ? d.price.toLocaleString("ru-RU") + " сом" : "—" }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <DuplicateTrackModal v-if="duplicate" :existing="duplicate" @close="duplicate = null" />
 
     <div v-if="showAddModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="closeAddModal">
       <div class="card w-full max-w-md">

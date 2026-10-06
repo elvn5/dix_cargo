@@ -205,7 +205,7 @@ export async function sendBroadcast(
   payload: { text: string; files: BroadcastFile[] },
 ): Promise<BroadcastResult> {
   const users = await db.user.findMany({
-    where: { telegram_id: { gt: 0 } },
+    where: { telegram_id: { gt: 0 }, deleted_at: null },
     select: { telegram_id: true },
   });
 

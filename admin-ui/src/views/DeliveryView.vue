@@ -248,7 +248,10 @@ onMounted(loadClients);
             <input v-model="price" type="number" min="0" step="0.01" class="input" placeholder="0.00" data-test="deliver-price" />
           </div>
         </div>
-        <div v-if="tariff > 0" class="text-xs text-slate-500">Тариф: <b>{{ tariff }} сом/кг</b></div>
+        <div class="text-xs text-slate-500" data-test="deliver-hint">
+          Вес и цена — общие на всю выдачу, а не на каждую посылку.
+          <template v-if="tariff > 0"> Тариф: <b>{{ tariff }} сом/кг</b></template>
+        </div>
         <button
           class="btn btn-primary w-full"
           :disabled="selectedPackages.length === 0 || delivering"

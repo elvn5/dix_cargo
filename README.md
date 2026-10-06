@@ -176,3 +176,25 @@ npx prisma migrate deploy && node dist/index.js
 ```
 
 Накатывать вручную не нужно — ни на staging, ни на prod.
+
+### Логи
+
+На сервере хранятся два журнала. Оба лежат в docker-томах и переживают деплой (обычные `docker logs` при пересоздании контейнера обнуляются).
+
+| Журнал | Что пишется | Где |
+|---|---|---|
+| Действия приложения | JSON-строка на событие: входы в админку, все изменяющие запросы, создание/правка/удаление клиентов и посылок (с полным снимком удаляемых данных), выдачи, импорт, рассылки, регистрации в боте, ошибки | том `app_logs` → `/app/logs/audit-ГГГГ-ММ-ДД.log` в контейнере бота |
+| Изменения БД | Все `INSERT`/`UPDATE`/`DELETE` с параметрами и медленные (>1 с) запросы | том postgres → `/var/lib/postgresql/data/log/postgresql-ГГГГ-ММ-ДД.log` |
+
+```bash
+# Действия по клиенту DIX-0017 (prod)
+docker exec cargo_prod-bot-1 grep -h "DIX-0017" /app/logs/audit-2026-10-06.log
+
+# Все удаления
+docker exec cargo_prod-bot-1 grep -h '"event":"\(user.trash\|user.purge\|package.delete\|packages.delete\)"' /app/logs/audit-2026-10-06.log
+
+# Изменения в БД Бишкека за день
+docker exec cargo_prod-postgres-1 cat /var/lib/postgresql/data/log/postgresql-2026-10-06.log
+```
+
+Docker-логи контейнеров (stdout) ротируются: до 10 файлов по 20 МБ на контейнер. Файлы журналов в томах автоматически не удаляются — при необходимости чистите старые вручную.

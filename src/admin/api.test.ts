@@ -34,9 +34,18 @@ function fakeDb(overrides: Record<string, any> = {}) {
       count: vi.fn().mockResolvedValue(0),
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       delete: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    deliveryGroup: {
+      create: vi.fn().mockResolvedValue({ id: 50 }),
+      delete: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { weight: null } }),
     },
     package: {
       count: vi.fn().mockResolvedValue(0),
@@ -69,6 +78,8 @@ function fakeDb(overrides: Record<string, any> = {}) {
   for (const [model, methods] of Object.entries(overrides)) {
     Object.assign((base as any)[model], methods);
   }
+  // Интерактивная транзакция выполняется на том же фейковом клиенте
+  (base as any).$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(base));
   return base as unknown as PrismaClient;
 }
 
@@ -319,6 +330,7 @@ describe("users routes", () => {
     expect(res.body.user.telegram_id).toBe("1");
     expect(res.body.packages).toHaveLength(1);
     expect(res.body.tariff).toBe(150);
+    expect(res.body.deliveries).toEqual([]);
   });
 
   it("PUT /users/:id returns 409 duplicate_code when the code collides", async () => {
@@ -344,14 +356,128 @@ describe("users routes", () => {
     expect(res.status).toBe(500);
   });
 
-  it("DELETE /users/:id deletes and confirms", async () => {
+  it("DELETE /users/:id moves the user to the trash instead of deleting", async () => {
     const db = fakeDb();
     getPrismaMock.mockReturnValue(db);
     const app = buildApp();
     const agent = await loginAgent(app);
     const res = await agent.delete("/api/admin/users/1");
     expect(res.body).toEqual({ ok: true });
-    expect(db.user.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+    expect(db.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, deleted_at: null },
+      data: { deleted_at: expect.any(Date) },
+    });
+    expect(db.user.delete).not.toHaveBeenCalled();
+    expect(db.package.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("DELETE /users/:id 404s when the user is missing or already in the trash", async () => {
+    const db = fakeDb({ user: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.delete("/api/admin/users/1");
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /users lists only users that are not in the trash", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.get("/api/admin/users?page=1&q=");
+    expect(db.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { deleted_at: null } }));
+  });
+
+  it("POST /users reports that a duplicate phone belongs to a user in the trash", async () => {
+    const db = fakeDb({
+      user: {
+        create: vi.fn().mockRejectedValue({ code: "P2002", meta: { target: ["phone"] } }),
+        findFirst: vi.fn().mockResolvedValue({ id: 48, deleted_at: new Date() }),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/users").send({ full_name: "A", phone: "500100500", client_code: "DIX-0017" });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "duplicate_phone", in_trash: true, user_id: 48 });
+  });
+});
+
+describe("trash routes", () => {
+  it("GET /trash lists trashed users with their package counts", async () => {
+    const db = fakeDb({
+      user: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 48, telegram_id: -1n, full_name: "A", phone: "1", client_code: "DIX-0017", deleted_at: new Date(), _count: { packages: 8 } },
+        ]),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/trash");
+    expect(db.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { deleted_at: { not: null } } }));
+    expect(res.body.users[0]).toMatchObject({ id: 48, packages_count: 8, telegram_id: "-1" });
+  });
+
+  it("POST /trash/:id/restore brings the user back", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/trash/48/restore");
+    expect(res.body).toEqual({ ok: true });
+    expect(db.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 48, deleted_at: { not: null } },
+      data: { deleted_at: null },
+    });
+  });
+
+  it("POST /trash/:id/restore 404s for a user that is not in the trash", async () => {
+    const db = fakeDb({ user: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/trash/48/restore");
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE /trash/:id deletes permanently only users from the trash", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.delete("/api/admin/trash/48");
+    expect(res.body).toEqual({ ok: true });
+    expect(db.user.deleteMany).toHaveBeenCalledWith({ where: { id: 48, deleted_at: { not: null } } });
+  });
+
+  it("DELETE /trash/:id logs a full snapshot of the user and packages before deleting", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const snapshot = { id: 48, client_code: "DIX-0017", deleted_at: new Date(), packages: [{ id: 2245, track_code: "JT5522254535556" }] };
+    const db = fakeDb({ user: { findFirst: vi.fn().mockResolvedValue(snapshot) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.delete("/api/admin/trash/48");
+
+    const entries = log.mock.calls.map(([line]) => { try { return JSON.parse(String(line)); } catch { return null; } });
+    const purge = entries.find((e) => e?.event === "user.purge");
+    expect(purge.user.client_code).toBe("DIX-0017");
+    expect(purge.user.packages[0].track_code).toBe("JT5522254535556");
+    expect(entries.some((e) => e?.event === "admin.request" && e.method === "DELETE" && e.status === 200)).toBe(true);
+    log.mockRestore();
+  });
+
+  it("DELETE /trash/:id 404s for an active user", async () => {
+    const db = fakeDb({ user: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.delete("/api/admin/trash/1");
+    expect(res.status).toBe(404);
   });
 });
 
@@ -378,7 +504,7 @@ describe("POST /users/:id/packages/status", () => {
     expect(res.body).toEqual({ ok: true });
     expect(db.package.updateMany).toHaveBeenCalledWith({
       where: { id: { in: [9] }, user_id: 1 },
-      data: { status: "IN_OFFICE", weight: 2.5, price: 375 },
+      data: { status: "IN_OFFICE", delivery_group_id: null, weight: 2.5, price: 375 },
     });
     expect(bot.api.sendMessage).toHaveBeenCalledWith(555, expect.any(String), { parse_mode: "HTML" });
   });
@@ -398,7 +524,7 @@ describe("POST /users/:id/packages/status", () => {
 
     expect(db.package.updateMany).toHaveBeenCalledWith({
       where: { id: { in: [9] }, user_id: 1 },
-      data: { status: "IN_OFFICE", weight: 2.5, price: 375 },
+      data: { status: "IN_OFFICE", delivery_group_id: null, weight: 2.5, price: 375 },
     });
   });
 
@@ -417,7 +543,7 @@ describe("POST /users/:id/packages/status", () => {
 
     expect(db.package.updateMany).toHaveBeenCalledWith({
       where: { id: { in: [9] }, user_id: 1 },
-      data: { status: "IN_OFFICE", weight: 2, price: 100 },
+      data: { status: "IN_OFFICE", delivery_group_id: null, weight: 2, price: 100 },
     });
   });
 
@@ -436,8 +562,58 @@ describe("POST /users/:id/packages/status", () => {
 
     expect(db.package.updateMany).toHaveBeenCalledWith({
       where: { id: { in: [9] }, user_id: 1 },
-      data: { status: "IN_OFFICE", weight: 2 },
+      data: { status: "IN_OFFICE", delivery_group_id: null, weight: 2 },
     });
+  });
+
+  it("DELIVERED creates a delivery group with the weight and price and zeroes the packages", async () => {
+    const bot = fakeBot();
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 555n }) },
+      package: {
+        updateMany: vi.fn().mockResolvedValue({ count: 3 }),
+        findMany: vi.fn().mockResolvedValue([{ track_code: "T1" }, { track_code: "T2" }, { track_code: "T3" }]),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/users/1/packages/status")
+      .send({ ids: [7, 8, 9], status: "DELIVERED", weight: "2.35", price: "558.36" });
+
+    expect(res.body).toEqual({ ok: true });
+    expect(db.deliveryGroup.create).toHaveBeenCalledWith({ data: { user_id: 1, weight: 2.35, price: 558.36 } });
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [7, 8, 9] }, user_id: 1 },
+      data: { status: "DELIVERED", delivery_group_id: 50, weight: 0, price: 0 },
+    });
+    // В уведомлении — общий вес и цена выдачи
+    const text = (bot.api.sendMessage as any).mock.calls[0][1] as string;
+    expect(text).toContain("2.35 кг");
+    expect(text).toContain("558,36");
+  });
+
+  it("DELIVERED without weight and price keeps the packages' own values", async () => {
+    const db = fakeDb({ package: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "DELIVERED" });
+
+    expect(db.deliveryGroup.create).toHaveBeenCalledWith({ data: { user_id: 1, weight: null, price: null } });
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [9] }, user_id: 1 },
+      data: { status: "DELIVERED", delivery_group_id: 50 },
+    });
+  });
+
+  it("DELIVERED drops the empty group when none of the packages belong to the user", async () => {
+    const db = fakeDb({ package: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/users/1/packages/status").send({ ids: [9], status: "DELIVERED", weight: 1 });
+    expect(db.deliveryGroup.delete).toHaveBeenCalledWith({ where: { id: 50 } });
   });
 
   it("does not notify for IN_TRANSIT", async () => {
@@ -452,6 +628,21 @@ describe("POST /users/:id/packages/status", () => {
 });
 
 describe("POST /users/:id/packages/delete", () => {
+  it("logs the deleted packages so they can be restored", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const db = fakeDb({ package: { findMany: vi.fn().mockResolvedValue([{ id: 9, track_code: "SF1220355201421" }]) } });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/users/112/packages/delete").send({ ids: [9] });
+
+    const entry = log.mock.calls
+      .map(([line]) => { try { return JSON.parse(String(line)); } catch { return null; } })
+      .find((e) => e?.event === "packages.delete");
+    expect(entry).toMatchObject({ level: "warn", user_id: 112, packages: [{ id: 9, track_code: "SF1220355201421" }] });
+    log.mockRestore();
+  });
+
   it("deletes the given packages scoped to the user", async () => {
     const db = fakeDb();
     getPrismaMock.mockReturnValue(db);
@@ -655,6 +846,79 @@ describe("packages routes", () => {
     expect(db.package.create).toHaveBeenCalledWith({
       data: { user_id: 1, track_code: "T1", status: "IN_TRANSIT", weight: null, price: null },
     });
+  });
+
+  it("POST /packages refuses a duplicate track code of another client", async () => {
+    const db = fakeDb({
+      package: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 112, track_code: "JT5528716373946", status: "IN_OFFICE",
+          user: { id: 1, client_code: "KADIX-0001", full_name: "Мусаева Милана", deleted_at: null },
+        }),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/packages").send({ user_id: "11", track_code: " jt5528716373946 ", status: "IN_OFFICE" });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: "duplicate_track",
+      existing: {
+        id: 112, track_code: "JT5528716373946", status: "IN_OFFICE",
+        user_id: 1, client_code: "KADIX-0001", full_name: "Мусаева Милана", in_trash: false,
+      },
+    });
+    expect(db.package.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { track_code: { equals: "jt5528716373946", mode: "insensitive" } },
+    }));
+    expect(db.package.create).not.toHaveBeenCalled();
+  });
+
+  it("POST /packages rejects an empty track code", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/packages").send({ user_id: "1", track_code: "  ", status: "IN_TRANSIT" });
+    expect(res.status).toBe(400);
+    expect(db.package.create).not.toHaveBeenCalled();
+  });
+
+  it("PUT /packages/:id refuses a track code that another package already has", async () => {
+    const db = fakeDb({
+      package: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 5, track_code: "T2", status: "IN_TRANSIT",
+          user: { id: 2, client_code: "DIX-0002", full_name: "B", deleted_at: new Date() },
+        }),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.put("/api/admin/packages/1").send({ track_code: "T2", status: "IN_TRANSIT" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.existing).toMatchObject({ id: 5, in_trash: true });
+    expect(db.package.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { track_code: { equals: "T2", mode: "insensitive" }, id: { not: 1 } },
+    }));
+    expect(db.package.update).not.toHaveBeenCalled();
+  });
+
+  it("PUT /packages/:id detaches the package from its delivery when it is no longer delivered", async () => {
+    const db = fakeDb({
+      package: { update: vi.fn().mockResolvedValue({ id: 1, track_code: "T1", user_id: 1, user: { client_code: "DIX-0001" } }) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.put("/api/admin/packages/1").send({ track_code: "T1", status: "IN_TRANSIT" });
+    expect(db.package.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ delivery_group_id: null }),
+    }));
   });
 
   it("GET /packages/:id 404s when missing", async () => {
@@ -907,6 +1171,41 @@ describe("POST /packages/import", () => {
     expect(res.body.errors[0]).toContain("DIX-9999");
     // nothing is persisted during a preview
     expect(db.package.create).not.toHaveBeenCalled();
+  });
+
+  it("skips a track that already belongs to another client", async () => {
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 2, client_code: "DIX-0002", full_name: "B" }) },
+      package: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 1, track_code: "TRACK1", status: "IN_TRANSIT",
+          user: { id: 1, client_code: "DIX-0001", full_name: "A", deleted_at: null },
+        }),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer([["", "", "DIX-0002", "TRACK1"]]), "import.xlsx");
+    expect(res.body.imported).toBe(0);
+    expect(res.body.items[0]).toMatchObject({ action: "skip", reason: "duplicate" });
+    expect(db.package.create).not.toHaveBeenCalled();
+  });
+
+  it("does not import packages for a client in the trash", async () => {
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 2, client_code: "DIX-0002", deleted_at: new Date() }) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer([["", "", "DIX-0002", "TRACK1"]]), "import.xlsx");
+    expect(res.body.imported).toBe(0);
+    expect(res.body.items[0]).toMatchObject({ action: "skip", reason: "user_not_found" });
   });
 
   it("skips a duplicate track that repeats within the same file", async () => {
@@ -1264,7 +1563,7 @@ describe("broadcast routes", () => {
     const res = await agent.get("/api/admin/broadcast/audience");
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ count: 7 });
-    expect(db.user.count).toHaveBeenCalledWith({ where: { telegram_id: { gt: 0 } } });
+    expect(db.user.count).toHaveBeenCalledWith({ where: { deleted_at: null, telegram_id: { gt: 0 } } });
   });
 
   it("POST /broadcast rejects an empty message with no files", async () => {

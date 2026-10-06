@@ -1,7 +1,43 @@
+# Логи docker (stdout/stderr контейнеров) с ротацией, чтобы не забить диск.
+# Важно: при пересоздании контейнера (каждый деплой бота) docker logs обнуляются,
+# поэтому постоянные журналы пишутся в тома: журнал действий бота — в app_logs,
+# журнал изменений БД (INSERT/UPDATE/DELETE) — в каталог log внутри тома postgres.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "10"
+
+# Postgres пишет в файлы log/postgresql-ГГГГ-ММ-ДД.log (в томе с данными) все
+# изменяющие запросы с параметрами и медленные (>1 с) запросы. Подключения не
+# пишем — healthcheck подключается каждые 5 с и забил бы журнал.
+x-postgres-command: &postgres-command
+  - postgres
+  - -c
+  - logging_collector=on
+  - -c
+  - log_directory=log
+  - -c
+  - log_filename=postgresql-%Y-%m-%d.log
+  - -c
+  - log_rotation_age=1d
+  - -c
+  - log_rotation_size=0
+  - -c
+  - log_statement=mod
+  - -c
+  - log_min_duration_statement=1000
+  - -c
+  - "log_line_prefix=%m [%p] %u@%d %h "
+  - -c
+  - log_timezone=Asia/Bishkek
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: always
+    command: *postgres-command
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cargo_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -17,6 +53,8 @@ services:
   postgres_kant:
     image: postgres:16-alpine
     restart: always
+    command: *postgres-command
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cargo_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -32,6 +70,7 @@ services:
   bot:
     image: ${IMAGE}
     restart: always
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,10 +85,12 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ADMIN_COOKIE_SECRET: ${ADMIN_COOKIE_SECRET}
       ADMIN_PORT: ${ADMIN_PORT:-3000}
+      LOG_DIR: /app/logs
     ports:
       - "${ADMIN_PORT:-3000}:${ADMIN_PORT:-3000}"
     volumes:
       - marketplace_uploads:/app/uploads
+      - app_logs:/app/logs
 
 volumes:
   postgres_data:
@@ -57,4 +98,6 @@ volumes:
   postgres_kant_data:
     driver: local
   marketplace_uploads:
+    driver: local
+  app_logs:
     driver: local

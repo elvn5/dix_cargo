@@ -15,6 +15,7 @@ import { DEFAULT_SUPPORT_TEXT } from "../utils/supportText";
 import { DEFAULT_ADDRESSES_TEXT } from "../utils/addressesText";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, APP_VERSION, IS_STAGING, getBranch, requireApiAuth } from "./auth";
 import { notifyStatusChange, notifyResetDecision } from "./notify";
+import { logger } from "../utils/logger";
 import { sanitizeTelegramHtml, plainTextLength, sendBroadcast, TG_MESSAGE_LIMIT, type BroadcastFile } from "./broadcast";
 
 // ── Сериализация ──────────────────────────────────────────────────────────────
@@ -43,8 +44,82 @@ async function loadTariff(db: ReturnType<typeof getPrisma>): Promise<number> {
   return parseFloat(setting?.value ?? "0") || 0;
 }
 
+// ── Корзина ──────────────────────────────────────────────────────────────────
+
+/** Активные клиенты — не в корзине. */
+const ACTIVE_USER = { deleted_at: null };
+/** Посылки активных клиентов: посылки клиента в корзине скрыты вместе с ним. */
+const ACTIVE_PACKAGE = { user: ACTIVE_USER };
+
+// ── Дубли трек-кодов ─────────────────────────────────────────────────────────
+
+/**
+ * Посылка с тем же трек-кодом (без учёта регистра) у любого клиента филиала,
+ * включая клиентов в корзине. excludeId — не считать дублем саму редактируемую посылку.
+ */
+async function findDuplicateTrack(db: ReturnType<typeof getPrisma>, trackCode: string, excludeId?: number) {
+  return db.package.findFirst({
+    where: {
+      track_code: { equals: trackCode, mode: "insensitive" },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    include: { user: { select: { id: true, client_code: true, full_name: true, deleted_at: true } } },
+  });
+}
+
+type DuplicatePackage = NonNullable<Awaited<ReturnType<typeof findDuplicateTrack>>>;
+
+function duplicateTrackResponse(dup: DuplicatePackage) {
+  return {
+    error: "duplicate_track",
+    existing: {
+      id: dup.id,
+      track_code: dup.track_code,
+      status: dup.status,
+      user_id: dup.user.id,
+      client_code: dup.user.client_code,
+      full_name: dup.user.full_name,
+      in_trash: !!dup.user.deleted_at,
+    },
+  };
+}
+
+/** Поле, нарушившее уникальность (P2002): Prisma отдаёт либо список полей, либо имя индекса. */
+function uniqueViolationField(e: any): string {
+  const target = e?.meta?.target;
+  const raw = Array.isArray(target) ? target.join(",") : String(target ?? "");
+  if (raw.includes("phone")) return "phone";
+  if (raw.includes("client_code")) return "client_code";
+  if (raw.includes("telegram_id")) return "telegram_id";
+  return "";
+}
+
+const DUPLICATE_ERROR: Record<string, string> = {
+  phone: "duplicate_phone",
+  client_code: "duplicate_code",
+  telegram_id: "duplicate_telegram",
+};
+
 export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void {
   const api = Router();
+
+  // Журнал всех изменяющих запросов админки: метод, путь, итоговый статус, длительность.
+  // Тело не пишем — в нём бывает пароль (/login); подробности пишут сами обработчики.
+  api.use((req, res, next) => {
+    if (req.method === "GET") return next();
+    const started = Date.now();
+    res.on("finish", () => {
+      logger.info("admin.request", {
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        ms: Date.now() - started,
+        branch: req.session?.branch ?? DEFAULT_BRANCH,
+        ip: req.ip,
+      });
+    });
+    next();
+  });
 
   // ── Auth ───────────────────────────────────────────────────────────────────
 
@@ -63,8 +138,10 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
       req.session.admin = true;
       if (remember) req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+      logger.info("admin.login", { email, ip: req.ip });
       return res.json({ ok: true });
     }
+    logger.warn("admin.login_failed", { email, ip: req.ip });
     res.status(401).json({ error: "invalid_credentials" });
   });
 
@@ -96,8 +173,15 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const soy = new Date(now.getFullYear(), 0, 1);
     const since = (d: Date) => ({ gte: d });
 
-    const sumWeight = (d: Date) =>
-      db.package.aggregate({ where: { created_at: since(d) }, _sum: { weight: true } });
+    // Вес за период = вес посылок + вес выдач (в группе выдачи вес хранится один раз,
+    // а у самих посылок группы он обнулён — поэтому двойного счёта нет)
+    const sumWeight = async (d: Date) => {
+      const [pkgs, groups] = await Promise.all([
+        db.package.aggregate({ where: { ...ACTIVE_PACKAGE, created_at: since(d) }, _sum: { weight: true } }),
+        db.deliveryGroup.aggregate({ where: { user: ACTIVE_USER, created_at: since(d) }, _sum: { weight: true } }),
+      ]);
+      return (pkgs._sum.weight ?? 0) + (groups._sum.weight ?? 0);
+    };
 
     const [
       totalUsers, totalPackages,
@@ -107,24 +191,24 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       pkgOffice, pkgTransit, pkgDelivered,
       latestUsers,
     ] = await Promise.all([
-      db.user.count(),
-      db.package.count(),
-      db.user.count({ where: { created_at: since(sod) } }),
-      db.user.count({ where: { created_at: since(sow) } }),
-      db.user.count({ where: { created_at: since(som) } }),
-      db.user.count({ where: { created_at: since(soy) } }),
-      db.package.count({ where: { created_at: since(sod) } }),
-      db.package.count({ where: { created_at: since(sow) } }),
-      db.package.count({ where: { created_at: since(som) } }),
-      db.package.count({ where: { created_at: since(soy) } }),
+      db.user.count({ where: ACTIVE_USER }),
+      db.package.count({ where: ACTIVE_PACKAGE }),
+      db.user.count({ where: { ...ACTIVE_USER, created_at: since(sod) } }),
+      db.user.count({ where: { ...ACTIVE_USER, created_at: since(sow) } }),
+      db.user.count({ where: { ...ACTIVE_USER, created_at: since(som) } }),
+      db.user.count({ where: { ...ACTIVE_USER, created_at: since(soy) } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, created_at: since(sod) } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, created_at: since(sow) } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, created_at: since(som) } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, created_at: since(soy) } }),
       sumWeight(sod),
       sumWeight(sow),
       sumWeight(som),
       sumWeight(soy),
-      db.package.count({ where: { status: "IN_OFFICE" } }),
-      db.package.count({ where: { status: "IN_TRANSIT" } }),
-      db.package.count({ where: { status: "DELIVERED" } }),
-      db.user.findMany({ orderBy: { created_at: "desc" }, take: 5 }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, status: "IN_OFFICE" } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, status: "IN_TRANSIT" } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, status: "DELIVERED" } }),
+      db.user.findMany({ where: ACTIVE_USER, orderBy: { created_at: "desc" }, take: 5 }),
     ]);
 
     res.json({
@@ -132,10 +216,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       period: {
         usersDay, usersWeek, usersMonth, usersYear,
         pkgDay, pkgWeek, pkgMonth, pkgYear,
-        weightDay: weightDay._sum.weight ?? 0,
-        weightWeek: weightWeek._sum.weight ?? 0,
-        weightMonth: weightMonth._sum.weight ?? 0,
-        weightYear: weightYear._sum.weight ?? 0,
+        weightDay, weightWeek, weightMonth, weightYear,
       },
       latestUsers: latestUsers.map(serializeUser),
     });
@@ -151,12 +232,12 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const q = (req.query.q as string) ?? "";
 
     const where = q
-      ? { OR: [
+      ? { ...ACTIVE_USER, OR: [
           { full_name:   { contains: q, mode: "insensitive" as const } },
           { phone:       { contains: q } },
           { client_code: { contains: q, mode: "insensitive" as const } },
         ] }
-      : {};
+      : ACTIVE_USER;
 
     const [users, total] = await Promise.all([
       db.user.findMany({
@@ -190,9 +271,24 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       const newUser = await db.user.create({
         data: { full_name: full_name.trim(), phone: cleanPhone, client_code: code, telegram_id: tgId },
       });
+      logger.info("user.create", {
+        branch, source: "admin", user_id: newUser.id, client_code: newUser.client_code,
+        full_name: newUser.full_name, phone: newUser.phone, telegram_id: newUser.telegram_id,
+      });
       res.json({ user: serializeUser(newUser) });
     } catch (e: any) {
-      if (e?.code === "P2002") return res.status(409).json({ error: "duplicate_phone" });
+      if (e?.code === "P2002") {
+        const field = uniqueViolationField(e);
+        // Если поле занято клиентом из корзины — подсказываем восстановить его, а не создавать заново
+        const holder = field === "phone" ? await db.user.findFirst({ where: { phone: cleanPhone } })
+          : field === "client_code" ? await db.user.findFirst({ where: { client_code: code } })
+          : null;
+        return res.status(409).json({
+          error: DUPLICATE_ERROR[field] ?? "duplicate_phone",
+          in_trash: !!holder?.deleted_at,
+          user_id: holder?.id,
+        });
+      }
       throw e;
     }
   });
@@ -202,35 +298,101 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const user = await db.user.findUnique({ where: { id: Number(req.params.id) } });
     if (!user) return res.status(404).json({ error: "not_found" });
 
-    const [packages, tariff] = await Promise.all([
+    const [packages, tariff, deliveries] = await Promise.all([
       db.package.findMany({ where: { user_id: user.id }, orderBy: { created_at: "desc" } }),
       loadTariff(db),
+      db.deliveryGroup.findMany({
+        where: { user_id: user.id },
+        include: { packages: { select: { id: true, track_code: true } } },
+        orderBy: { created_at: "desc" },
+      }),
     ]);
 
-    res.json({ user: serializeUser(user), packages, tariff });
+    res.json({ user: serializeUser(user), packages, tariff, deliveries });
   });
 
   api.put("/users/:id", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const { client_code, full_name, phone } = req.body as Record<string, string>;
     try {
+      const before = await db.user.findUnique({ where: { id: Number(req.params.id) } });
       const user = await db.user.update({
         where: { id: Number(req.params.id) },
         data: { client_code, full_name, phone },
       });
+      logger.info("user.update", {
+        branch: getBranch(req), user_id: user.id,
+        before: before && { client_code: before.client_code, full_name: before.full_name, phone: before.phone },
+        after: { client_code: user.client_code, full_name: user.full_name, phone: user.phone },
+      });
       res.json({ user: serializeUser(user) });
     } catch (e: any) {
       if (e?.code === "P2002") {
-        const field = (e.meta?.target as string[] | undefined)?.[0] ?? "";
+        const field = uniqueViolationField(e);
         return res.status(409).json({ error: field === "phone" ? "duplicate_phone" : "duplicate_code" });
       }
       throw e;
     }
   });
 
+  // Удаление клиента — перенос в корзину: посылки остаются привязаны к нему и скрываются вместе с ним
   api.delete("/users/:id", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
-    await db.user.delete({ where: { id: Number(req.params.id) } });
+    const id = Number(req.params.id);
+    const { count } = await db.user.updateMany({
+      where: { id, deleted_at: null },
+      data: { deleted_at: new Date() },
+    });
+    if (count === 0) return res.status(404).json({ error: "not_found" });
+    const user = await db.user.findUnique({ where: { id }, include: { _count: { select: { packages: true } } } });
+    logger.info("user.trash", {
+      branch: getBranch(req), user_id: id, client_code: user?.client_code, full_name: user?.full_name,
+      packages: user?._count.packages,
+    });
+    res.json({ ok: true });
+  });
+
+  // ── Корзина ────────────────────────────────────────────────────────────────
+
+  api.get("/trash", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const users = await db.user.findMany({
+      where: { deleted_at: { not: null } },
+      orderBy: { deleted_at: "desc" },
+      include: { _count: { select: { packages: true } } },
+    });
+    res.json({
+      users: users.map(({ _count, ...u }) => ({ ...serializeUser(u), packages_count: _count.packages })),
+    });
+  });
+
+  api.post("/trash/:id/restore", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const id = Number(req.params.id);
+    const { count } = await db.user.updateMany({
+      where: { id, deleted_at: { not: null } },
+      data: { deleted_at: null },
+    });
+    if (count === 0) return res.status(404).json({ error: "not_found" });
+    const user = await db.user.findUnique({ where: { id } });
+    logger.info("user.restore", { branch: getBranch(req), user_id: id, client_code: user?.client_code });
+    res.json({ ok: true });
+  });
+
+  // Окончательное удаление — только из корзины; посылки удаляются вместе с клиентом
+  api.delete("/trash/:id", requireApiAuth, async (req, res) => {
+    const db = getPrisma(getBranch(req));
+    const id = Number(req.params.id);
+    // Снимок перед окончательным удалением — по журналу клиента и посылки можно восстановить
+    const snapshot = await db.user.findFirst({
+      where: { id, deleted_at: { not: null } },
+      include: { packages: true },
+    });
+    const { count } = await db.user.deleteMany({
+      where: { id, deleted_at: { not: null } },
+    });
+    if (count === 0) return res.status(404).json({ error: "not_found" });
+    logger.warn("user.purge", { branch: getBranch(req), user: snapshot });
     res.json({ ok: true });
   });
 
@@ -253,14 +415,37 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
         if (tariff > 0) p = Number((w * tariff).toFixed(2));
       }
 
-      const data: Record<string, unknown> = { status };
-      if (w !== null) data.weight = w;
-      if (p !== null) data.price = p;
+      const where = { id: { in: idList }, user_id: userId };
 
-      await db.package.updateMany({
-        where: { id: { in: idList }, user_id: userId },
-        data: data as { status: "IN_TRANSIT" | "IN_OFFICE" | "DELIVERED"; weight?: number; price?: number },
-      });
+      if (status === "DELIVERED") {
+        // Выдача: вес и цена относятся ко всей выдаче, поэтому хранятся один раз — в группе,
+        // а не копируются в каждую посылку. У посылок группы вес и цена обнуляются.
+        const hasValues = w !== null || p !== null;
+        await db.$transaction(async (tx) => {
+          const group = await tx.deliveryGroup.create({ data: { user_id: userId, weight: w, price: p } });
+          const { count } = await tx.package.updateMany({
+            where,
+            data: { status: "DELIVERED", delivery_group_id: group.id, ...(hasValues ? { weight: 0, price: 0 } : {}) },
+          });
+          if (count === 0) await tx.deliveryGroup.delete({ where: { id: group.id } });
+          logger.info("packages.deliver", {
+            branch: getBranch(req), user_id: userId, delivery_group_id: count ? group.id : null,
+            package_ids: idList, updated: count, weight: w, price: p,
+          });
+        });
+      } else {
+        const data: Record<string, unknown> = { status, delivery_group_id: null };
+        if (w !== null) data.weight = w;
+        if (p !== null) data.price = p;
+
+        const { count } = await db.package.updateMany({
+          where,
+          data: data as { status: "IN_TRANSIT" | "IN_OFFICE"; delivery_group_id: null; weight?: number; price?: number },
+        });
+        logger.info("packages.status", {
+          branch: getBranch(req), user_id: userId, package_ids: idList, updated: count, status, weight: w, price: p,
+        });
+      }
 
       if (status === "IN_OFFICE" || status === "DELIVERED") {
         const user = await db.user.findUnique({ where: { id: userId } });
@@ -277,7 +462,9 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const { ids } = req.body as { ids: number[] };
     const idList = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
     if (idList.length > 0) {
+      const doomed = await db.package.findMany({ where: { id: { in: idList }, user_id: userId } });
       await db.package.deleteMany({ where: { id: { in: idList }, user_id: userId } });
+      logger.warn("packages.delete", { branch: getBranch(req), user_id: userId, packages: doomed });
     }
     res.json({ ok: true });
   });
@@ -287,6 +474,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
   api.get("/reset-requests", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const requests = await db.accessResetRequest.findMany({
+      where: { user: ACTIVE_USER },
       include: { user: { select: { id: true, client_code: true, full_name: true, phone: true, telegram_id: true } } },
       orderBy: { created_at: "desc" },
     });
@@ -319,6 +507,9 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       data: { status: "APPROVED", resolved_at: new Date() },
     });
 
+    logger.info("reset_request.approve", {
+      branch: getBranch(req), request_id: request.id, user_id: request.user_id, telegram_id: request.requested_telegram_id,
+    });
     await notifyResetDecision(bot, request.requested_telegram_id, true);
     res.json({ ok: true });
   });
@@ -333,6 +524,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       data: { status: "REJECTED", resolved_at: new Date() },
     });
 
+    logger.info("reset_request.reject", { branch: getBranch(req), request_id: request.id, user_id: request.user_id });
     await notifyResetDecision(bot, request.requested_telegram_id, false);
     res.json({ ok: true });
   });
@@ -349,7 +541,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const dateTo = (req.query.date_to as string) ?? "";
     const tab = (req.query.tab as string) === "archive" ? "archive" : "active";
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { ...ACTIVE_PACKAGE };
     if (search) where.track_code = { contains: search, mode: "insensitive" };
 
     if (tab === "archive") {
@@ -374,8 +566,8 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
         take: PAGE_SIZE,
       }),
       db.package.count({ where }),
-      db.package.count({ where: { status: { not: "DELIVERED" } } }),
-      db.package.count({ where: { status: "DELIVERED" } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, status: { not: "DELIVERED" } } }),
+      db.package.count({ where: { ...ACTIVE_PACKAGE, status: "DELIVERED" } }),
     ]);
 
     res.json({ packages, total, totalPages: Math.ceil(total / PAGE_SIZE), activeCount, archiveCount });
@@ -385,7 +577,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const db = getPrisma(getBranch(req));
     const [tariff, users] = await Promise.all([
       loadTariff(db),
-      db.user.findMany({ orderBy: { client_code: "asc" }, select: { id: true, client_code: true, full_name: true } }),
+      db.user.findMany({ where: ACTIVE_USER, orderBy: { client_code: "asc" }, select: { id: true, client_code: true, full_name: true } }),
     ]);
     res.json({ tariff, users });
   });
@@ -393,15 +585,27 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
   api.post("/packages", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const { user_id, track_code, status, weight, price } = req.body as Record<string, string>;
+    const trackCode = String(track_code ?? "").trim();
+    if (!trackCode) return res.status(400).json({ error: "track_code_required" });
+
+    const dup = await findDuplicateTrack(db, trackCode);
+    if (dup) {
+      logger.warn("package.duplicate_rejected", {
+        branch: getBranch(req), track_code: trackCode, user_id: Number(user_id), existing_id: dup.id, existing_user_id: dup.user.id,
+      });
+      return res.status(409).json(duplicateTrackResponse(dup));
+    }
+
     const pkg = await db.package.create({
       data: {
         user_id: Number(user_id),
-        track_code: track_code.trim(),
+        track_code: trackCode,
         status: status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
         weight: weight ? parseFloat(weight) : null,
         price: price ? parseFloat(price) : null,
       },
     });
+    logger.info("package.create", { branch: getBranch(req), package: pkg });
     res.json({ package: pkg });
   });
 
@@ -413,7 +617,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const dateTo = (req.query.date_to as string) ?? "";
     const tab = (req.query.tab as string) === "archive" ? "archive" : "active";
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { ...ACTIVE_PACKAGE };
     if (search) where.track_code = { contains: search, mode: "insensitive" };
     if (tab === "archive") {
       where.status = "DELIVERED";
@@ -429,16 +633,20 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
     const packages = await db.package.findMany({
       where,
-      include: { user: { select: { client_code: true, full_name: true } } },
+      include: {
+        user: { select: { client_code: true, full_name: true } },
+        delivery_group: { select: { id: true, weight: true, price: true } },
+      },
       orderBy: { created_at: "desc" },
     });
 
     const STATUS_LABEL: Record<string, string> = { IN_OFFICE: "В офисе", IN_TRANSIT: "В пути", DELIVERED: "Выдан" };
     const wsData = [
-      ["Трек-код", "Статус", "DIX-код", "Клиент", "Вес (кг)", "Цена (сом)", "Дата"],
+      ["Трек-код", "Статус", "DIX-код", "Клиент", "Вес (кг)", "Цена (сом)", "Дата", "Выдача №", "Вес выдачи (кг)", "Цена выдачи (сом)"],
       ...packages.map(p => [
         p.track_code, STATUS_LABEL[p.status] ?? p.status, p.user.client_code, p.user.full_name,
         p.weight ?? "", p.price ?? "", p.created_at.toLocaleString("ru-RU"),
+        p.delivery_group?.id ?? "", p.delivery_group?.weight ?? "", p.delivery_group?.price ?? "",
       ]),
     ];
 
@@ -500,10 +708,11 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       if (!clientCode || !trackCode) { unrecognized++; continue; }
 
       const user = await db.user.findUnique({ where: { client_code: clientCode } });
-      if (!user) { items.push({ clientCode, trackCode, userName: null, action: "skip", reason: "user_not_found" }); continue; }
+      if (!user || user.deleted_at) { items.push({ clientCode, trackCode, userName: null, action: "skip", reason: "user_not_found" }); continue; }
 
-      const dupKey = `${user.id}:${trackCode}`;
-      const exists = planned.has(dupKey) || await db.package.findFirst({ where: { user_id: user.id, track_code: trackCode } });
+      // Дубль — тот же трек-код у любого клиента филиала (а не только у этого же клиента)
+      const dupKey = trackCode.toUpperCase();
+      const exists = planned.has(dupKey) || await findDuplicateTrack(db, trackCode);
       if (exists) { items.push({ clientCode, trackCode, userName: user.full_name ?? null, action: "skip", reason: "duplicate" }); continue; }
 
       planned.add(dupKey);
@@ -541,6 +750,11 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       });
       imported++;
     }
+    logger.info("packages.import", {
+      branch, filename, shipping_date: shippingDate, imported, skipped: toSkip, unrecognized,
+      skipped_duplicates: items.filter((i) => i.reason === "duplicate").map((i) => `${i.clientCode}:${i.trackCode}`),
+      skipped_unknown_clients: items.filter((i) => i.reason === "user_not_found").map((i) => i.clientCode),
+    });
 
     res.json({ dryRun: false, imported, skipped: toSkip, ...summary });
   });
@@ -550,7 +764,10 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const [pkg, tariff] = await Promise.all([
       db.package.findUnique({
         where: { id: Number(req.params.id) },
-        include: { user: { select: { client_code: true, full_name: true } } },
+        include: {
+          user: { select: { client_code: true, full_name: true } },
+          delivery_group: { include: { packages: { select: { id: true, track_code: true } } } },
+        },
       }),
       loadTariff(db),
     ]);
@@ -561,17 +778,33 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
   api.put("/packages/:id", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const { track_code, status, weight, price } = req.body as Record<string, string>;
+    const id = Number(req.params.id);
+    const trackCode = String(track_code ?? "").trim();
+    if (!trackCode) return res.status(400).json({ error: "track_code_required" });
 
+    const dup = await findDuplicateTrack(db, trackCode, id);
+    if (dup) {
+      logger.warn("package.duplicate_rejected", {
+        branch: getBranch(req), track_code: trackCode, package_id: id, existing_id: dup.id, existing_user_id: dup.user.id,
+      });
+      return res.status(409).json(duplicateTrackResponse(dup));
+    }
+
+    const before = await db.package.findUnique({ where: { id } });
     const pkg = await db.package.update({
-      where: { id: Number(req.params.id) },
+      where: { id },
       data: {
-        track_code: track_code.trim(),
+        track_code: trackCode,
         status: status as "IN_OFFICE" | "IN_TRANSIT" | "DELIVERED",
+        // Вернули из «Выдан» — посылка больше не относится к выдаче
+        ...(status !== "DELIVERED" ? { delivery_group_id: null } : {}),
         weight: weight ? parseFloat(weight) : null,
         price: price ? parseFloat(price) : null,
       },
       include: { user: true },
     });
+    const { user: _owner, ...after } = pkg;
+    logger.info("package.update", { branch: getBranch(req), package_id: id, before, after });
 
     if (status === "IN_OFFICE" || status === "DELIVERED") {
       await notifyStatusChange(bot, db, pkg.user_id, pkg.user.client_code, [pkg.track_code], status, pkg.weight, pkg.price);
@@ -582,7 +815,8 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
 
   api.delete("/packages/:id", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
-    await db.package.delete({ where: { id: Number(req.params.id) } });
+    const deleted = await db.package.delete({ where: { id: Number(req.params.id) } });
+    logger.warn("package.delete", { branch: getBranch(req), package: deleted });
     res.json({ ok: true });
   });
 
@@ -603,12 +837,14 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const promo = await db.promoCode.create({
       data: { code: code.trim(), description: description?.trim() || null },
     });
+    logger.info("promo.create", { branch: getBranch(req), promo_id: promo.id, code: promo.code });
     res.json({ promo });
   });
 
   api.delete("/promocodes/:id", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
-    await db.promoCode.delete({ where: { id: Number(req.params.id) } });
+    const promo = await db.promoCode.delete({ where: { id: Number(req.params.id) } });
+    logger.info("promo.delete", { branch: getBranch(req), promo });
     res.json({ ok: true });
   });
 
@@ -662,6 +898,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       const value = settingValue(body[key]);
       if (value === null) continue;
       await db.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
+      logger.info("settings.update", { branch: getBranch(req), key, value });
     }
     if (Array.isArray(body.managers)) {
       const managers = (body.managers as { name?: unknown; url?: unknown }[])
@@ -697,6 +934,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
         return;
       }
       const filename = `dump_${branch}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.sql`;
+      logger.info("db.dump", { branch, filename, bytes: chunks.reduce((n, c) => n + c.length, 0), ip: req.ip });
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", "application/sql");
       res.send(Buffer.concat(chunks));
@@ -813,7 +1051,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
   // Сколько реальных пользователей бота получат рассылку в текущем филиале.
   api.get("/broadcast/audience", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
-    const count = await db.user.count({ where: { telegram_id: { gt: 0 } } });
+    const count = await db.user.count({ where: { ...ACTIVE_USER, telegram_id: { gt: 0 } } });
     res.json({ count });
   });
 
@@ -832,6 +1070,9 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     if (plainTextLength(text) > TG_MESSAGE_LIMIT) return res.status(400).json({ error: "too_long" });
 
     const result = await sendBroadcast(bot, db, { text, files });
+    logger.info("broadcast.send", {
+      branch: getBranch(req), text_length: plainTextLength(text), files: files.map((f) => f.filename), result,
+    });
     res.json(result);
   });
 

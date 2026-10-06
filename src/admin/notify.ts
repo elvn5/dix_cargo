@@ -1,5 +1,6 @@
 import { Bot, Context } from "grammy";
 import type { PrismaClient } from "@prisma/client";
+import { logger } from "../utils/logger";
 
 export async function notifyStatusChange(
   bot: Bot<Context>,
@@ -13,7 +14,7 @@ export async function notifyStatusChange(
 ) {
   try {
     const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user || user.telegram_id <= 0n) return;
+    if (!user || user.deleted_at || user.telegram_id <= 0n) return;
 
     const isSingle  = trackCodes.length === 1;
     const trackList = trackCodes.map(t => `• <code>${t}</code>`).join("\n");
@@ -34,7 +35,7 @@ export async function notifyStatusChange(
 
     await bot.api.sendMessage(Number(user.telegram_id), text, { parse_mode: "HTML" });
   } catch (err) {
-    console.error("[Admin] Не удалось отправить уведомление пользователю:", err);
+    logger.error("notify.status_failed", { user_id: userId, client_code: clientCode, status, error: err });
   }
 }
 
@@ -45,6 +46,6 @@ export async function notifyResetDecision(bot: Bot<Context>, telegramId: bigint,
       : "❌ Ваша заявка на сброс доступа отклонена. Обратитесь к менеджеру.";
     await bot.api.sendMessage(Number(telegramId), text, { parse_mode: "HTML" });
   } catch (err) {
-    console.error("[Admin] Не удалось отправить уведомление о заявке на сброс доступа:", err);
+    logger.error("notify.reset_failed", { telegram_id: telegramId, approved, error: err });
   }
 }

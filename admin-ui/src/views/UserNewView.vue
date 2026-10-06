@@ -45,8 +45,11 @@ async function submit() {
   } catch (e) {
     if (e instanceof ApiError && e.message === "phone") {
       error.value = "Неверный формат телефона. Введите ровно 9 цифр, например: 500123123";
-    } else if (e instanceof ApiError && e.message === "duplicate_phone") {
-      error.value = "Этот номер телефона уже используется другим пользователем.";
+    } else if (e instanceof ApiError && ["duplicate_phone", "duplicate_code", "duplicate_telegram"].includes(e.message)) {
+      const what = e.message === "duplicate_code" ? "Этот код клиента" : e.message === "duplicate_telegram" ? "Этот Telegram ID" : "Этот номер телефона";
+      error.value = e.data?.in_trash
+        ? `${what} принадлежит клиенту в корзине — восстановите его в разделе «Корзина» вместо создания нового.`
+        : `${what} уже используется другим пользователем.`;
     } else {
       error.value = "Не удалось создать пользователя.";
     }

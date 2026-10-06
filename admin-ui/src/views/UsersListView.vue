@@ -52,7 +52,7 @@ function goToPage(p: number) {
 }
 
 async function remove(u: UserRow) {
-  if (!confirm(`Удалить пользователя ${u.full_name}?`)) return;
+  if (!confirm(`Переместить пользователя ${u.full_name} в корзину вместе с его посылками?\nВосстановить можно в разделе «Корзина».`)) return;
   await api.delete(`/admin/users/${u.id}`);
   await load();
 }

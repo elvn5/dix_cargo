@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
 import LoadingSpinner from "../components/LoadingSpinner.vue";
+import DuplicateTrackModal from "../components/DuplicateTrackModal.vue";
+import { duplicateTrackFrom, type DuplicateTrack } from "../utils/duplicateTrack";
 
 const route = useRoute();
 const router = useRouter();
@@ -18,12 +20,20 @@ interface PkgData {
   created_at: string;
   updated_at: string;
   user: { client_code: string; full_name: string };
+  delivery_group: {
+    id: number;
+    weight: number | null;
+    price: number | null;
+    created_at: string;
+    packages: { id: number; track_code: string }[];
+  } | null;
 }
 
 const pkg = ref<PkgData | null>(null);
 const tariff = ref(0);
 const loading = ref(true);
 const saved = ref(route.query.saved === "1");
+const duplicate = ref<DuplicateTrack | null>(null);
 
 const form = reactive({
   track_code: "",
@@ -62,7 +72,14 @@ watch(
 );
 
 async function save() {
-  await api.put(`/admin/packages/${pkgId.value}`, form);
+  try {
+    await api.put(`/admin/packages/${pkgId.value}`, form);
+  } catch (e) {
+    const dup = duplicateTrackFrom(e);
+    if (!dup) throw e;
+    duplicate.value = dup;
+    return;
+  }
   router.replace({ query: { saved: "1" } });
   saved.value = true;
   await load();
@@ -135,6 +152,22 @@ onMounted(load);
               <dt class="text-slate-400 text-xs">Цена</dt>
               <dd>{{ pkg.price != null ? pkg.price.toLocaleString("ru-RU") + " сом" : "—" }}</dd>
             </div>
+            <div v-if="pkg.delivery_group" data-test="delivery-group">
+              <dt class="text-slate-400 text-xs">Выдача №{{ pkg.delivery_group.id }} от {{ fmtDateTime(pkg.delivery_group.created_at) }}</dt>
+              <dd>
+                {{ pkg.delivery_group.weight != null ? pkg.delivery_group.weight + " кг" : "—" }} ·
+                {{ pkg.delivery_group.price != null ? pkg.delivery_group.price.toLocaleString("ru-RU") + " сом" : "—" }}
+                <span class="text-slate-400">за {{ pkg.delivery_group.packages.length }} посыл.</span>
+              </dd>
+              <dd class="mt-1 flex flex-wrap gap-1">
+                <router-link
+                  v-for="gp in pkg.delivery_group.packages"
+                  :key="gp.id"
+                  :to="`/packages/${gp.id}`"
+                  class="font-mono text-xs text-indigo-600 hover:underline"
+                >{{ gp.track_code }}</router-link>
+              </dd>
+            </div>
             <div>
               <dt class="text-slate-400 text-xs">Дата добавления</dt>
               <dd>{{ fmtDateTime(pkg.created_at) }}</dd>
@@ -153,5 +186,6 @@ onMounted(load);
         </div>
       </div>
     </div>
+    <DuplicateTrackModal v-if="duplicate" :existing="duplicate" @close="duplicate = null" />
   </template>
 </template>

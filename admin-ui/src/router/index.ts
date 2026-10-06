@@ -18,6 +18,7 @@ const router = createRouter({
     { path: "/reset-requests", name: "reset-requests", component: () => import("../views/ResetRequestsView.vue") },
     { path: "/settings", name: "settings", component: () => import("../views/SettingsView.vue") },
     { path: "/marketplaces", name: "marketplaces", component: () => import("../views/MarketplacesView.vue") },
+    { path: "/trash", name: "trash", component: () => import("../views/TrashView.vue") },
     { path: "/broadcast", name: "broadcast", component: () => import("../views/BroadcastView.vue") },
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],

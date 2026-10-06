@@ -73,6 +73,7 @@ function fakeDb(overrides: Record<string, any> = {}) {
     setting: {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn(),
     },
     accessResetRequest: {
       findFirst: vi.fn().mockResolvedValue(null),
@@ -675,6 +676,41 @@ describe("message:text — registration flow", () => {
 
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("DIX-0001"), expect.any(Object));
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("Ваш адрес"), expect.any(Object));
+  });
+
+  it("does not register a phone that belongs to a client in the trash", async () => {
+    const trashed = fakeUser({ deleted_at: new Date() } as Partial<User>);
+    // findUserByPhone видит клиента в корзине и игнорирует его, findTrashedUser — находит
+    const findFirst = vi.fn().mockResolvedValue(trashed);
+    getPrismaMock.mockImplementation(() => fakeDb({ user: { findFirst } }));
+
+    const bot = setupBot();
+    await startAndSelectBranch(bot);
+    const handler = findHandler(bot, "on", "message:text");
+    const ctx = fakeCtx({ message: { text: "500100500" } });
+    await handler(ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("удалён администратором"), expect.any(Object));
+    expect(ctx.reply).not.toHaveBeenCalledWith(expect.stringContaining("Введите ваше ФИО"), expect.any(Object));
+  });
+
+  it("does not create a second account for a Telegram user whose account is in the trash", async () => {
+    const create = vi.fn();
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null) // phone step: телефон свободен
+      .mockResolvedValueOnce(null) // phone step: в корзине по телефону нет
+      .mockResolvedValueOnce(fakeUser({ deleted_at: new Date() } as Partial<User>)); // name step: в корзине по Telegram ID
+    getPrismaMock.mockImplementation(() => fakeDb({ user: { findFirst, create } }));
+
+    const bot = setupBot();
+    await startAndSelectBranch(bot);
+    const handler = findHandler(bot, "on", "message:text");
+    await handler(fakeCtx({ message: { text: "500100501" } }));
+    const ctx = fakeCtx({ message: { text: "Иван Иванов" } });
+    await handler(ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("удалён администратором"), expect.any(Object));
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("reports a database error during registration instead of crashing", async () => {

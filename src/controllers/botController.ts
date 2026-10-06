@@ -1,5 +1,6 @@
 import { Bot, Context, InputFile } from "grammy";
 import { userService } from "../services/userService";
+import { logger } from "../utils/logger";
 import { resetRequestService } from "../services/resetRequestService";
 import { getPrisma, DEFAULT_BRANCH, branchLabel, type Branch } from "../database/prismaClient";
 import { DEFAULT_SUPPORT_TEXT } from "../utils/supportText";
@@ -155,6 +156,9 @@ async function sendRegistrationAddress(ctx: Context, db: PrismaClient, code: str
   }
 }
 
+const TRASHED_ACCOUNT_TEXT =
+  "⚠️ Ваш аккаунт был удалён администратором.\n\nЧтобы восстановить доступ, обратитесь к менеджеру ⬇️";
+
 function buildProfile(code: string, fullName: string, phone: string): string {
   return (
     `✅ Вы успешно зарегистрированы\n\n` +
@@ -232,12 +236,13 @@ export function registerControllers(bot: Bot<Context>): void {
     const db = getPrisma(branch);
 
     const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    if (!user || user.deleted_at) {
       await ctx.reply("⚠️ Не удалось найти аккаунт для сброса. Обратитесь к менеджеру.");
       return;
     }
 
     await resetRequestService.createOrUpdate(db, userId, BigInt(senderId));
+    logger.info("reset_request.create", { branch, user_id: userId, client_code: user.client_code, telegram_id: senderId });
 
     await ctx.reply("✅ Заявка на сброс доступа отправлена. Ожидайте одобрения от администратора.");
   });
@@ -528,6 +533,10 @@ export function registerControllers(bot: Bot<Context>): void {
         data:  { claimed_by: user.id, claimed_at: new Date() },
       });
 
+      if (claimed.count > 0) {
+        logger.info("promo.claim", { branch: found.branch, user_id: user.id, client_code: user.client_code, promo_id: promo.id });
+      }
+
       if (claimed.count === 0) {
         // Кто-то успел раньше (race condition)
         await ctx.reply(
@@ -652,9 +661,20 @@ export function registerControllers(bot: Bot<Context>): void {
           where: { id: phoneUser.id },
           data: { telegram_id: BigInt(senderId) },
         });
+        logger.info("user.link_telegram", {
+          branch: state.branch, user_id: linked.id, client_code: linked.client_code, telegram_id: senderId,
+        });
         await ctx.reply(buildProfile(linked.client_code, linked.full_name, linked.phone),
           { parse_mode: "HTML", reply_markup: await getManagersKeyboard(db) });
         await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard(db) });
+        return;
+      }
+
+      // Аккаунт с этим номером в корзине — номер занят, восстановить может только менеджер
+      if (await userService.findTrashedUser(db, { phone: text })) {
+        logger.warn("registration.blocked_trashed", { branch: state.branch, telegram_id: senderId, phone: text, by: "phone" });
+        regState.delete(senderId);
+        await ctx.reply(TRASHED_ACCOUNT_TEXT, { reply_markup: await getManagersKeyboard(db) });
         return;
       }
 
@@ -695,7 +715,17 @@ export function registerControllers(bot: Bot<Context>): void {
           return;
         }
 
+        if (await userService.findTrashedUser(db, { telegramId: BigInt(senderId) })) {
+          logger.warn("registration.blocked_trashed", { branch: state.branch, telegram_id: senderId, by: "telegram_id" });
+          await ctx.reply(TRASHED_ACCOUNT_TEXT, { reply_markup: await getManagersKeyboard(db) });
+          return;
+        }
+
         const newUser = await userService.createUser(db, state.branch, BigInt(senderId), state.phone, text);
+        logger.info("user.create", {
+          branch: state.branch, source: "bot", user_id: newUser.id, client_code: newUser.client_code,
+          full_name: newUser.full_name, phone: newUser.phone, telegram_id: senderId,
+        });
 
         await ctx.reply(
           buildProfile(newUser.client_code, newUser.full_name, newUser.phone),
@@ -704,7 +734,7 @@ export function registerControllers(bot: Bot<Context>): void {
         await sendRegistrationAddress(ctx, db, newUser.client_code);
         await ctx.reply("Выберите раздел:", { reply_markup: await getMenuKeyboard(db) });
       } catch (error) {
-        console.error("[Registration] Ошибка при создании пользователя:", error);
+        logger.error("registration.failed", { branch: state.branch, telegram_id: senderId, error });
         await ctx.reply("⚠️ Произошла ошибка при регистрации. Попробуйте позже.");
       }
     }

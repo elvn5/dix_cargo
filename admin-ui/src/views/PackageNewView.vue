@@ -3,6 +3,8 @@ import { onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
+import DuplicateTrackModal from "../components/DuplicateTrackModal.vue";
+import { duplicateTrackFrom, type DuplicateTrack } from "../utils/duplicateTrack";
 
 pageTitle.value = "Новая посылка";
 
@@ -17,6 +19,7 @@ const status = ref<"IN_TRANSIT" | "IN_OFFICE" | "DELIVERED">("IN_TRANSIT");
 const weight = ref("");
 const price = ref("");
 const submitting = ref(false);
+const duplicate = ref<DuplicateTrack | null>(null);
 
 onMounted(async () => {
   const data = await api.get<{ tariff: number; users: { id: number; client_code: string; full_name: string }[] }>(
@@ -47,6 +50,10 @@ async function submit() {
       price: price.value || undefined,
     });
     router.push("/packages");
+  } catch (e) {
+    const dup = duplicateTrackFrom(e);
+    if (!dup) throw e;
+    duplicate.value = dup;
   } finally {
     submitting.value = false;
   }
@@ -101,5 +108,6 @@ async function submit() {
         </div>
       </form>
     </div>
+    <DuplicateTrackModal v-if="duplicate" :existing="duplicate" @close="duplicate = null" />
   </div>
 </template>

@@ -89,3 +89,32 @@ describe("PackageNewView", () => {
     });
   });
 });
+
+describe("PackageNewView — duplicate track", () => {
+  it("shows a modal and does not add the package when the track code already exists", async () => {
+    const { ApiError } = await import("../api/client");
+    vi.mocked(api.post).mockRejectedValue(new ApiError(409, "duplicate_track", {
+      error: "duplicate_track",
+      existing: {
+        id: 112, track_code: "JT5528716373946", status: "IN_OFFICE",
+        user_id: 1, client_code: "KADIX-0001", full_name: "Мусаева Милана", in_trash: false,
+      },
+    }));
+    const wrapper = mount(PackageNewView, globalStubs);
+    await flushPromises();
+
+    await wrapper.find('input[placeholder="RU123456789CN"]').setValue("JT5528716373946");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const modal = wrapper.find('[data-test="duplicate-modal"]');
+    expect(modal.exists()).toBe(true);
+    expect(modal.text()).toContain("уже есть");
+    expect(modal.text()).toContain("KADIX-0001");
+    expect(modal.text()).toContain("В офисе");
+    expect(push).not.toHaveBeenCalled();
+
+    await wrapper.find('[data-test="duplicate-close"]').trigger("click");
+    expect(wrapper.find('[data-test="duplicate-modal"]').exists()).toBe(false);
+  });
+});

@@ -1,8 +1,11 @@
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Тело ответа с ошибкой — для подробностей (например, какая посылка уже имеет этот трек-код). */
+  data: Record<string, unknown> | undefined;
+  constructor(status: number, message: string, data?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -21,7 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const data = isJson ? await res.json() : undefined;
 
   if (!res.ok) {
-    throw new ApiError(res.status, (data && data.error) || `Ошибка запроса (${res.status})`);
+    throw new ApiError(res.status, (data && data.error) || `Ошибка запроса (${res.status})`, data);
   }
 
   return data as T;
