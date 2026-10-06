@@ -6,19 +6,50 @@ const EXCLUDED_CODE_NUMBERS = new Set([
   1989, 1991, 2101, 3333, 1920, 5555,
 ]);
 
+/** Ключ настройки с последним выданным номером клиентского кода. */
+export const CLIENT_CODE_SEQ_KEY = "client_code_seq";
+
+/**
+ * «Красивые» коды (DIX-1111, DIX-7777 и т.п.) выдаются вручную и не входят в
+ * обычную нумерацию — при первом запуске счётчик стартует с максимального
+ * номера ниже этого порога.
+ */
+const VANITY_CODE_THRESHOLD = 1000;
+
+function codeNumber(code: string): number {
+  return parseInt(code.split("-")[1] ?? "0", 10) || 0;
+}
+
+/**
+ * Следующий клиентский код. Номера только растут и никогда не переиспользуются:
+ * последний выданный номер хранится в настройках, поэтому код удалённого
+ * клиента не достанется новому. Занятые (в т.ч. клиентами в корзине и
+ * введёнными вручную) и исключённые номера пропускаются.
+ */
 async function generateClientCode(db: PrismaClient, branch: Branch): Promise<string> {
   const prefix = clientCodePrefix(branch);
   const allCodes = await db.user.findMany({
     select: { client_code: true },
   });
+  const takenNumbers = new Set(allCodes.map(u => codeNumber(u.client_code)));
 
-  const takenNumbers = new Set(
-    allCodes.map(u => parseInt(u.client_code.split("-")[1] ?? "0", 10))
-  );
+  const seq = await db.setting.findUnique({ where: { key: CLIENT_CODE_SEQ_KEY } });
+  let last = seq ? parseInt(seq.value, 10) || 0 : 0;
+  if (!seq) {
+    for (const n of takenNumbers) {
+      if (n < VANITY_CODE_THRESHOLD && n > last) last = n;
+    }
+  }
 
-  // Find the first available number starting from 1, skipping excluded and taken
-  let next = 1;
+  let next = last + 1;
   while (EXCLUDED_CODE_NUMBERS.has(next) || takenNumbers.has(next)) next++;
+
+  // Резервируем номер сразу: даже если создание клиента сорвётся, номер не вернётся в оборот
+  await db.setting.upsert({
+    where: { key: CLIENT_CODE_SEQ_KEY },
+    update: { value: String(next) },
+    create: { key: CLIENT_CODE_SEQ_KEY, value: String(next) },
+  });
 
   return `${prefix}-${String(next).padStart(4, "0")}`;
 }
@@ -32,15 +63,36 @@ async function generateUniqueClientCode(db: PrismaClient, branch: Branch): Promi
   throw new Error("Failed to generate unique client code after 10 attempts");
 }
 
+/** Активный (не в корзине) клиент по Telegram ID. */
 async function findUserByTelegramId(db: PrismaClient, telegramId: bigint): Promise<User | null> {
-  return db.user.findUnique({
+  const user = await db.user.findUnique({
     where: { telegram_id: telegramId },
   });
+  return user && !user.deleted_at ? user : null;
 }
 
+/** Активный (не в корзине) клиент по телефону. */
 async function findUserByPhone(db: PrismaClient, phone: string): Promise<User | null> {
-  return db.user.findFirst({
+  const user = await db.user.findFirst({
     where: { phone },
+  });
+  return user && !user.deleted_at ? user : null;
+}
+
+/**
+ * Клиент в корзине с тем же Telegram ID или телефоном. Такой аккаунт держит
+ * уникальные поля, поэтому заново зарегистрироваться с ними нельзя — нужен менеджер.
+ */
+async function findTrashedUser(
+  db: PrismaClient,
+  { telegramId, phone }: { telegramId?: bigint; phone?: string }
+): Promise<User | null> {
+  const or: { telegram_id?: bigint; phone?: string }[] = [];
+  if (telegramId !== undefined) or.push({ telegram_id: telegramId });
+  if (phone !== undefined) or.push({ phone });
+  if (or.length === 0) return null;
+  return db.user.findFirst({
+    where: { deleted_at: { not: null }, OR: or },
   });
 }
 
@@ -83,6 +135,7 @@ async function findUserAnyBranch(
 export const userService = {
   findUserByTelegramId,
   findUserByPhone,
+  findTrashedUser,
   findUserAnyBranch,
   createUser,
   generateClientCode,

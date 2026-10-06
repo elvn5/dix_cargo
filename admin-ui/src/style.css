@@ -101,6 +101,9 @@
   .alert-danger {
     @apply bg-red-50 text-red-800 border border-red-200;
   }
+  .alert-warning {
+    @apply bg-amber-50 text-amber-800 border border-amber-200;
+  }
 
   /* ── Table ────────────────────────────────────────────────────────────── */
   .table-wrap {

@@ -14,7 +14,10 @@ function fakeDb(overrides: Partial<{
   findUnique: ReturnType<typeof vi.fn>;
   findFirst: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
+  settings: Record<string, string>;
 }> = {}) {
+  // Настройки храним в памяти, чтобы счётчик кодов вёл себя как в БД
+  const settings: Record<string, string> = { ...(overrides.settings ?? {}) };
   return {
     user: {
       findMany: overrides.findMany ?? vi.fn().mockResolvedValue([]),
@@ -22,7 +25,15 @@ function fakeDb(overrides: Partial<{
       findFirst: overrides.findFirst ?? vi.fn().mockResolvedValue(null),
       create: overrides.create ?? vi.fn(),
     },
-  } as unknown as PrismaClient;
+    setting: {
+      findUnique: vi.fn(async ({ where }: { where: { key: string } }) =>
+        where.key in settings ? { key: where.key, value: settings[where.key] } : null),
+      upsert: vi.fn(async ({ where, update }: { where: { key: string }; update: { value: string } }) => {
+        settings[where.key] = update.value;
+      }),
+    },
+    _settings: settings,
+  } as unknown as PrismaClient & { _settings: Record<string, string> };
 }
 
 function fakeUser(overrides: Partial<User> = {}): User {
@@ -58,11 +69,43 @@ describe("userService.generateClientCode", () => {
   });
 
   it("skips excluded (superstition) numbers", async () => {
-    const taken = Array.from({ length: 2221 }, (_, i) => ({ client_code: `DIX-${String(i + 1).padStart(4, "0")}` }));
-    const db = fakeDb({ findMany: vi.fn().mockResolvedValue(taken) });
-    // 1..2221 taken, 2222 is excluded, so the next free number is 2223
+    // счётчик дошёл до 2221, 2222 исключён — следующий номер 2223
+    const db = fakeDb({ settings: { client_code_seq: "2221" } });
     const code = await userService.generateClientCode(db, "bishkek");
     expect(code).toBe("DIX-2223");
+  });
+
+  it("never reuses the number of a deleted client", async () => {
+    // DIX-0002 удалили: свободная «дырка» не должна достаться новому клиенту
+    const db = fakeDb({
+      findMany: vi.fn().mockResolvedValue([{ client_code: "DIX-0001" }, { client_code: "DIX-0003" }]),
+    });
+    const code = await userService.generateClientCode(db, "bishkek");
+    expect(code).toBe("DIX-0004");
+  });
+
+  it("continues from the stored sequence and saves the issued number", async () => {
+    const db = fakeDb({ settings: { client_code_seq: "196" } });
+    expect(await userService.generateClientCode(db, "bishkek")).toBe("DIX-0197");
+    expect(await userService.generateClientCode(db, "bishkek")).toBe("DIX-0198");
+    expect(db._settings.client_code_seq).toBe("198");
+  });
+
+  it("skips numbers taken by manually entered codes", async () => {
+    const db = fakeDb({
+      settings: { client_code_seq: "295" },
+      findMany: vi.fn().mockResolvedValue([{ client_code: "DIX-0296" }]),
+    });
+    expect(await userService.generateClientCode(db, "bishkek")).toBe("DIX-0297");
+  });
+
+  it("ignores vanity codes when starting the sequence for the first time", async () => {
+    const db = fakeDb({
+      findMany: vi.fn().mockResolvedValue([
+        { client_code: "DIX-0196" }, { client_code: "DIX-7777" }, { client_code: "DIX-9999" },
+      ]),
+    });
+    expect(await userService.generateClientCode(db, "bishkek")).toBe("DIX-0197");
   });
 });
 
@@ -79,7 +122,7 @@ describe("userService.generateUniqueClientCode", () => {
       .mockResolvedValueOnce(null);       // second attempt: free
     const db = fakeDb({ findUnique });
     const code = await userService.generateUniqueClientCode(db, "bishkek");
-    expect(code).toBe("DIX-0001");
+    expect(code).toBe("DIX-0002");
     expect(findUnique).toHaveBeenCalledTimes(2);
   });
 
@@ -99,6 +142,29 @@ describe("userService.findUserByTelegramId", () => {
     const result = await userService.findUserByTelegramId(db, 123n);
     expect(findUnique).toHaveBeenCalledWith({ where: { telegram_id: 123n } });
     expect(result).toBe(user);
+  });
+});
+
+describe("userService — клиенты в корзине", () => {
+  it("findUserByTelegramId ignores a trashed client", async () => {
+    const db = fakeDb({ findUnique: vi.fn().mockResolvedValue(fakeUser({ deleted_at: new Date() } as Partial<User>)) });
+    expect(await userService.findUserByTelegramId(db, 123n)).toBeNull();
+  });
+
+  it("findUserByPhone ignores a trashed client", async () => {
+    const db = fakeDb({ findFirst: vi.fn().mockResolvedValue(fakeUser({ deleted_at: new Date() } as Partial<User>)) });
+    expect(await userService.findUserByPhone(db, "500100500")).toBeNull();
+  });
+
+  it("findTrashedUser looks up trashed clients by telegram id or phone", async () => {
+    const trashed = fakeUser({ deleted_at: new Date() } as Partial<User>);
+    const findFirst = vi.fn().mockResolvedValue(trashed);
+    const db = fakeDb({ findFirst });
+    const result = await userService.findTrashedUser(db, { telegramId: 5n, phone: "500100500" });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { deleted_at: { not: null }, OR: [{ telegram_id: 5n }, { phone: "500100500" }] },
+    });
+    expect(result).toBe(trashed);
   });
 });
 

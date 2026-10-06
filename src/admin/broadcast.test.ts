@@ -126,7 +126,7 @@ describe("sendBroadcast", () => {
     const res = await p;
     expect(res).toEqual({ total: 2, sent: 2, failed: 0 });
     expect(api.sendMessage).toHaveBeenCalledTimes(2);
-    expect(findMany).toHaveBeenCalledWith({ where: { telegram_id: { gt: 0 } }, select: { telegram_id: true } });
+    expect(findMany).toHaveBeenCalledWith({ where: { telegram_id: { gt: 0 }, deleted_at: null }, select: { telegram_id: true } });
   });
 
   it("counts a failed delivery without aborting the rest", async () => {

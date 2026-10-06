@@ -31,10 +31,32 @@ model Package {
   weight     Float?
   price      Float?
 
+  // Группа выдачи: вес и цена выдачи хранятся в группе, а не в каждой посылке
+  delivery_group_id Int?
+  delivery_group    DeliveryGroup? @relation(fields: [delivery_group_id], references: [id], onDelete: SetNull)
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@index([user_id])
+  @@index([track_code])
+  @@index([delivery_group_id])
   @@map("packages")
+}
+
+/// Одна выдача клиенту: несколько посылок с общим весом и ценой
+model DeliveryGroup {
+  id       Int       @id @default(autoincrement())
+  user_id  Int
+  user     User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  weight   Float?
+  price    Float?
+  packages Package[]
+
+  created_at DateTime @default(now())
+
+  @@index([user_id])
+  @@map("delivery_groups")
 }
 
 model PromoCode {
@@ -66,6 +88,10 @@ model User {
   packages      Package[]
   promo_codes   PromoCode[]
   reset_requests AccessResetRequest[]
+  delivery_groups DeliveryGroup[]
+
+  // Корзина: не null — клиент удалён (вместе с посылками скрыт), можно восстановить
+  deleted_at DateTime?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
