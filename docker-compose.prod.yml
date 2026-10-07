@@ -91,6 +91,36 @@ services:
     volumes:
       - marketplace_uploads:/app/uploads
       - app_logs:/app/logs
+      - predeploy_dumps:/app/backups
+
+  # Ежедневный зашифрованный бэкап обеих баз в Google Drive (backup/backup.sh).
+  # Включается профилем: COMPOSE_PROFILES=backup в .env (сейчас только прод).
+  backup:
+    image: ${BACKUP_IMAGE:-ghcr.io/elvn5/dix_cargo:backup-latest}
+    profiles: ["backup"]
+    restart: always
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres_kant:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Bishkek
+      BACKUP_TIME: "03:00"
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_KANT: ${DATABASE_URL_KANT}
+      GDRIVE_CLIENT_ID: ${GDRIVE_CLIENT_ID:-}
+      GDRIVE_CLIENT_SECRET: ${GDRIVE_CLIENT_SECRET:-}
+      GDRIVE_TOKEN: ${GDRIVE_TOKEN:-}
+      # Публичный ключ age: расшифровать бэкап можно только приватным ключом, которого нет на сервере
+      BACKUP_AGE_RECIPIENT: age1tdwr3ewn5h73x9p9x2qldprv4sk0hnm3dm3lagd42280r060n4qqzk3dz8
+      BACKUP_KEEP_DAILY_DAYS: "14"
+      BACKUP_KEEP_WEEKLY_DAYS: "62"
+      BACKUP_KEEP_MONTHLY_DAYS: "365"
+      # Алерт об ошибке в Telegram (пусто — алерты выключены)
+      BOT_TOKEN: ${BOT_TOKEN}
+      ALERT_CHAT_ID: ${BACKUP_ALERT_CHAT_ID:-}
 
 volumes:
   postgres_data:
@@ -100,4 +130,6 @@ volumes:
   marketplace_uploads:
     driver: local
   app_logs:
+    driver: local
+  predeploy_dumps:
     driver: local
