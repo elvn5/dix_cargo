@@ -63,6 +63,7 @@ function fakeDb(overrides: Record<string, any> = {}) {
       findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn(),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     promoCode: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -260,6 +261,16 @@ describe("users routes", () => {
     expect(res.body.users[0].telegram_id).toBe("100");
     expect(res.body.users[0].packages_count).toBe(3);
     expect(res.body.users[0]._count).toBeUndefined();
+  });
+
+  it("GET /users also finds a user by chat id", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.get("/api/admin/users?page=1&q=434413828");
+    const where = (db.user.findMany as any).mock.calls[0][0].where;
+    expect(where.OR).toContainEqual({ telegram_id: 434413828n });
   });
 
   it("POST /users rejects a malformed phone", async () => {
@@ -1289,6 +1300,87 @@ describe("promocodes routes", () => {
 // ── Настройки ────────────────────────────────────────────────────────────────
 
 describe("settings routes", () => {
+  it("GET /settings returns the backup alert chat id from the default branch", async () => {
+    const db = fakeDb({
+      setting: {
+        findUnique: vi.fn(async ({ where }: any) =>
+          where.key === "backup_alert_chat_id" ? { key: "backup_alert_chat_id", value: "434413828" } : null),
+      },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.get("/api/admin/settings");
+    expect(res.body.backupAlertChatId).toBe("434413828");
+    expect(getPrismaMock).toHaveBeenCalledWith("bishkek");
+  });
+
+  it("PUT /settings saves the backup alert chat id in the default branch whatever branch is selected", async () => {
+    const bishkek = fakeDb();
+    const kant = fakeDb();
+    getPrismaMock.mockImplementation((branch) => (branch === "kant" ? kant : bishkek));
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.post("/api/admin/branch").send({ branch: "kant" });
+    const res = await agent.put("/api/admin/settings").send({ backup_alert_chat_id: " -1001234567890 " });
+
+    expect(res.body).toEqual({ ok: true });
+    expect(bishkek.setting.upsert).toHaveBeenCalledWith({
+      where: { key: "backup_alert_chat_id" },
+      update: { value: "-1001234567890" },
+      create: { key: "backup_alert_chat_id", value: "-1001234567890" },
+    });
+    expect(kant.setting.upsert).not.toHaveBeenCalledWith(expect.objectContaining({ where: { key: "backup_alert_chat_id" } }));
+  });
+
+  it("PUT /settings clears the backup alert chat id when it is empty", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    await agent.put("/api/admin/settings").send({ backup_alert_chat_id: "" });
+    expect(db.setting.deleteMany).toHaveBeenCalledWith({ where: { key: "backup_alert_chat_id" } });
+  });
+
+  it("PUT /settings rejects a malformed chat id without saving anything", async () => {
+    const db = fakeDb();
+    getPrismaMock.mockReturnValue(db);
+    const app = buildApp();
+    const agent = await loginAgent(app);
+    const res = await agent.put("/api/admin/settings").send({ tariff_per_kg: "150", backup_alert_chat_id: "@dix_admin" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_chat_id");
+    expect(db.setting.upsert).not.toHaveBeenCalled();
+  });
+
+  it("POST /settings/test-alert sends a test message to the chat", async () => {
+    const bot = fakeBot();
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/settings/test-alert").send({ chat_id: "434413828" });
+    expect(res.body).toEqual({ ok: true });
+    expect(bot.api.sendMessage).toHaveBeenCalledWith(434413828, expect.stringContaining("Тестовое уведомление"));
+  });
+
+  it("POST /settings/test-alert reports Telegram errors", async () => {
+    const bot = fakeBot();
+    (bot.api.sendMessage as any).mockRejectedValue({ description: "Bad Request: chat not found" });
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/settings/test-alert").send({ chat_id: "1" });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "send_failed", description: "Bad Request: chat not found" });
+  });
+
+  it("POST /settings/test-alert rejects a malformed chat id", async () => {
+    const bot = fakeBot();
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent.post("/api/admin/settings/test-alert").send({ chat_id: "abc" });
+    expect(res.status).toBe(400);
+    expect(bot.api.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("GET /settings returns a key/value map and default managers when none are saved", async () => {
     const db = fakeDb({
       setting: {

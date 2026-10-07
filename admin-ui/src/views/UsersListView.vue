@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { api } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
 import LoadingSpinner from "../components/LoadingSpinner.vue";
+import { botChatId } from "../utils/chatId";
 
 pageTitle.value = "Пользователи";
 
@@ -12,6 +13,7 @@ interface UserRow {
   client_code: string;
   full_name: string;
   phone: string;
+  telegram_id: string;
   created_at: string;
   packages_count: number;
 }
@@ -75,7 +77,7 @@ onMounted(load);
         </router-link>
       </div>
       <form class="flex gap-2 flex-wrap w-full sm:w-auto" @submit.prevent="search">
-        <input v-model="q" class="input min-w-[180px]" placeholder="Поиск по имени, телефону, коду..." />
+        <input v-model="q" class="input min-w-[180px]" placeholder="Поиск по имени, телефону, коду, chat ID..." />
         <button class="btn btn-outline btn-sm">Найти</button>
         <button v-if="q" type="button" class="btn btn-outline btn-sm" @click="resetSearch">Сброс</button>
       </form>
@@ -83,19 +85,23 @@ onMounted(load);
     <div class="table-wrap">
       <table class="data-table">
         <thead>
-          <tr><th>КОД</th><th>ФИО</th><th>Телефон</th><th>Посылки</th><th>Дата регистрации</th><th></th></tr>
+          <tr><th>КОД</th><th>ФИО</th><th>Телефон</th><th>Chat ID</th><th>Посылки</th><th>Дата регистрации</th><th></th></tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="6"><LoadingSpinner compact label="" /></td>
+            <td colspan="7"><LoadingSpinner compact label="" /></td>
           </tr>
           <tr v-else-if="users.length === 0">
-            <td colspan="6" class="text-center text-slate-400 py-8">Нет пользователей</td>
+            <td colspan="7" class="text-center text-slate-400 py-8">Нет пользователей</td>
           </tr>
           <tr v-for="u in users" :key="u.id">
             <td><span class="badge-code">{{ u.client_code }}</span></td>
             <td>{{ u.full_name }}</td>
             <td>{{ u.phone }}</td>
+            <td data-test="chat-id">
+              <span v-if="botChatId(u.telegram_id)" class="font-mono text-xs">{{ botChatId(u.telegram_id) }}</span>
+              <span v-else class="text-xs text-slate-400" title="Клиент создан в админке и ещё не писал боту — уведомления не доходят">не в боте</span>
+            </td>
             <td><span class="badge badge-neutral">{{ u.packages_count }}</span></td>
             <td class="text-slate-400 text-xs">{{ fmtDate(u.created_at) }}</td>
             <td class="flex gap-1">

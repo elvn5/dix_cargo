@@ -198,3 +198,32 @@ docker exec cargo_prod-postgres-1 cat /var/lib/postgresql/data/log/postgresql-20
 ```
 
 Docker-логи контейнеров (stdout) ротируются: до 10 файлов по 20 МБ на контейнер. Файлы журналов в томах автоматически не удаляются — при необходимости чистите старые вручную.
+
+### Бэкапы БД
+
+**Ежедневно в Google Drive** (только прод). Сервис `backup` в `docker-compose.prod.yml` каждый день в 03:00 по Бишкеку снимает `pg_dump` обеих баз, шифрует их публичным ключом [age](https://github.com/FiloSottile/age) и загружает в Drive:
+
+```
+dix-backups/<bishkek|kant>/daily/    — 14 дней
+dix-backups/<bishkek|kant>/weekly/   — воскресные копии, 2 месяца
+dix-backups/<bishkek|kant>/monthly/  — копии за 1-е число, 1 год
+```
+
+Один бэкап делается сразу при старте сервиса — по его логу видно, что доступ к Drive работает. Ошибки пишутся в `docker logs` (событие `backup.failed`) и приходят в Telegram от бота в чат, указанный в админке: **Настройки бота → Алерты бэкапа** (там же кнопка тестового сообщения). Свой chat ID можно узнать командой `/chatid` в боте или в карточке клиента.
+
+**Перед каждой миграцией** бот снимает локальный дамп в том `predeploy_dumps` (`/app/backups`, последние 10 на каждую базу). Если дамп не удался, бот не стартует и миграция не применяется.
+
+Секреты в GitHub (Repository secrets): `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_TOKEN` (OAuth, scope `drive.file`). Приватный ключ age хранится **только вне сервера** — без него бэкапы не расшифровать.
+
+```bash
+# Бэкап вручную (prod)
+docker compose -p cargo_prod -f docker-compose.prod.yml exec backup /backup/backup.sh
+
+# Восстановление: скачать файл из Drive, расшифровать приватным ключом и залить в пустую базу
+age -d -i ~/dix-backup-key.txt bishkek_2026-10-07_0300.dump.age > bishkek.dump
+pg_restore --no-owner --clean --if-exists -d "postgresql://…" bishkek.dump
+
+# Откат на дамп перед миграцией (prod, Бишкек)
+docker exec cargo_prod-bot-1 ls -t /app/backups
+docker exec -i cargo_prod-bot-1 pg_restore --no-owner --clean --if-exists -d "$DATABASE_URL" /app/backups/predeploy_bishkek_….dump
+```

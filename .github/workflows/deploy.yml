@@ -149,6 +149,16 @@ jobs:
             ${{ env.IMAGE }}:${{ steps.version.outputs.VERSION }}
           build-args: APP_VERSION=${{ steps.version.outputs.VERSION }}
 
+      - name: Build and push backup image (production)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: backup
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:backup-latest
+            ${{ env.IMAGE }}:backup-${{ steps.version.outputs.VERSION }}
+
       - name: Copy compose file to server
         env:
           SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
@@ -197,6 +207,11 @@ jobs:
             ADMIN_COOKIE_SECRET=${{ secrets.ADMIN_COOKIE_SECRET }}
             ADMIN_PORT=3000
             IMAGE=${{ env.IMAGE }}:latest
+            COMPOSE_PROFILES=backup
+            BACKUP_IMAGE=${{ env.IMAGE }}:backup-latest
+            GDRIVE_CLIENT_ID=${{ secrets.GDRIVE_CLIENT_ID }}
+            GDRIVE_CLIENT_SECRET=${{ secrets.GDRIVE_CLIENT_SECRET }}
+            GDRIVE_TOKEN='${{ secrets.GDRIVE_TOKEN }}'
             EOF
 
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin

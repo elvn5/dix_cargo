@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
 import LoadingSpinner from "../components/LoadingSpinner.vue";
 
@@ -24,8 +24,52 @@ const saved = ref(false);
 const submitting = ref(false);
 const loading = ref(true);
 
+// ── Алерты бэкапа ──────────────────────────────────────────────────────────
+const alertChatId = ref("");
+const alertMsg = ref<{ kind: "success" | "danger"; text: string } | null>(null);
+const alertBusy = ref(false);
+
+function alertError(e: unknown): string {
+  if (e instanceof ApiError && e.message === "invalid_chat_id") return "Chat ID — это число, например 434413828 или -1001234567890.";
+  if (e instanceof ApiError && e.message === "send_failed") {
+    return `Telegram не принял сообщение: ${String(e.data?.description ?? "")}. Напишите боту /start с этого аккаунта и попробуйте снова.`;
+  }
+  return "Не удалось выполнить запрос.";
+}
+
+async function saveAlertChat() {
+  alertBusy.value = true;
+  alertMsg.value = null;
+  try {
+    await api.put("/admin/settings", { backup_alert_chat_id: alertChatId.value.trim() });
+    alertMsg.value = { kind: "success", text: alertChatId.value.trim() ? "Chat ID сохранён." : "Алерты выключены." };
+  } catch (e) {
+    alertMsg.value = { kind: "danger", text: alertError(e) };
+  } finally {
+    alertBusy.value = false;
+  }
+}
+
+async function testAlertChat() {
+  alertBusy.value = true;
+  alertMsg.value = null;
+  try {
+    await api.post("/admin/settings/test-alert", { chat_id: alertChatId.value.trim() });
+    alertMsg.value = { kind: "success", text: "Тестовое сообщение отправлено — проверьте Telegram." };
+  } catch (e) {
+    alertMsg.value = { kind: "danger", text: alertError(e) };
+  } finally {
+    alertBusy.value = false;
+  }
+}
+
 async function load() {
-  const data = await api.get<{ settings: Record<string, string>; managers: { name: string; url: string }[] }>("/admin/settings");
+  const data = await api.get<{
+    settings: Record<string, string>;
+    managers: { name: string; url: string }[];
+    backupAlertChatId?: string;
+  }>("/admin/settings");
+  alertChatId.value = data.backupAlertChatId ?? "";
   form.tariff_per_kg = data.settings.tariff_per_kg ?? "";
   form.forbidden_items = data.settings.forbidden_items ?? "";
   form.support_text = data.settings.support_text ?? "";
@@ -158,6 +202,37 @@ onMounted(load);
           <i class="bi bi-check-lg"></i> Сохранить
         </button>
       </form>
+    </div>
+
+    <div class="card p-6" data-test="alert-settings">
+      <h2 class="font-bold mb-1">🔔 Алерты бэкапа</h2>
+      <p class="text-sm text-slate-500 mb-3">
+        Если ежедневный бэкап базы в Google Drive не удастся, бот пришлёт сообщение в этот чат.
+        Настройка общая для всех филиалов. Узнать свой chat ID: отправьте боту команду <code>/chatid</code>
+        или найдите себя в разделе «Пользователи».
+      </p>
+      <div v-if="alertMsg" class="alert" :class="alertMsg.kind === 'success' ? 'alert-success' : 'alert-danger'" data-test="alert-msg">
+        {{ alertMsg.text }}
+      </div>
+      <div class="flex flex-wrap gap-2 items-end">
+        <div class="w-64">
+          <label class="field-label">Telegram chat ID</label>
+          <input v-model="alertChatId" class="input font-mono" placeholder="434413828" inputmode="numeric" data-test="alert-chat-id" />
+        </div>
+        <button type="button" class="btn btn-primary" :disabled="alertBusy" data-test="alert-save" @click="saveAlertChat">
+          <i class="bi bi-check-lg"></i> Сохранить
+        </button>
+        <button
+          type="button"
+          class="btn btn-outline"
+          :disabled="alertBusy || !alertChatId.trim()"
+          data-test="alert-test"
+          @click="testAlertChat"
+        >
+          <i class="bi bi-send"></i> Отправить тест
+        </button>
+      </div>
+      <div class="field-hint">Пустое поле — алерты выключены.</div>
     </div>
 
     <div class="card p-6">

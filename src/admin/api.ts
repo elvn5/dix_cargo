@@ -236,6 +236,8 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
           { full_name:   { contains: q, mode: "insensitive" as const } },
           { phone:       { contains: q } },
           { client_code: { contains: q, mode: "insensitive" as const } },
+          // Поиск по chat ID — только точное совпадение длинного числа
+          ...(/^\d{5,20}$/.test(q.trim()) ? [{ telegram_id: BigInt(q.trim()) }] : []),
         ] }
       : ACTIVE_USER;
 
@@ -851,6 +853,11 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
   // ── Настройки ──────────────────────────────────────────────────────────────
 
   const SETTINGS_KEYS = ["forbidden_items", "tariff_per_kg", "support_text", "addresses_text"];
+
+  // Chat ID для алертов сервиса бэкапов — одна настройка на все филиалы, хранится в базе
+  // филиала по умолчанию (backup/backup.sh читает её оттуда)
+  const BACKUP_ALERT_CHAT_KEY = "backup_alert_chat_id";
+  const isChatId = (v: string) => /^-?\d{1,20}$/.test(v);
   const LEGACY_MANAGER_KEYS = ["manager_1_name", "manager_1_url", "manager_2_name", "manager_2_url"];
   const DEFAULT_MANAGERS = [
     { name: "Лидия", url: "https://wa.me/996550867414" },
@@ -887,12 +894,17 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     if (!s.support_text?.trim()) s.support_text = DEFAULT_SUPPORT_TEXT;
     if (!s.addresses_text?.trim()) s.addresses_text = DEFAULT_ADDRESSES_TEXT;
     const managers = await loadManagers(db);
-    res.json({ settings: s, managers });
+    const alertChat = await getPrisma(DEFAULT_BRANCH).setting.findUnique({ where: { key: BACKUP_ALERT_CHAT_KEY } });
+    res.json({ settings: s, managers, backupAlertChatId: alertChat?.value ?? "" });
   });
 
   api.put("/settings", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));
     const body = req.body as Record<string, unknown>;
+
+    const alertChatId = body.backup_alert_chat_id === undefined ? undefined : String(body.backup_alert_chat_id ?? "").trim();
+    if (alertChatId && !isChatId(alertChatId)) return res.status(400).json({ error: "invalid_chat_id" });
+
     for (const key of SETTINGS_KEYS) {
       // <input type="number"> присылает число, а не строку — иначе значение молча терялось
       const value = settingValue(body[key]);
@@ -910,7 +922,34 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
         create: { key: "manager_buttons", value: JSON.stringify(managers) },
       });
     }
+    if (alertChatId !== undefined) {
+      const main = getPrisma(DEFAULT_BRANCH);
+      if (alertChatId) {
+        await main.setting.upsert({
+          where: { key: BACKUP_ALERT_CHAT_KEY },
+          update: { value: alertChatId },
+          create: { key: BACKUP_ALERT_CHAT_KEY, value: alertChatId },
+        });
+      } else {
+        await main.setting.deleteMany({ where: { key: BACKUP_ALERT_CHAT_KEY } });
+      }
+      logger.info("settings.update", { branch: DEFAULT_BRANCH, key: BACKUP_ALERT_CHAT_KEY, value: alertChatId });
+    }
     res.json({ ok: true });
+  });
+
+  // Проверка chat ID: бот отправляет тестовое сообщение — так видно, что алерты дойдут
+  api.post("/settings/test-alert", requireApiAuth, async (req, res) => {
+    const chatId = String((req.body as { chat_id?: unknown }).chat_id ?? "").trim();
+    if (!isChatId(chatId)) return res.status(400).json({ error: "invalid_chat_id" });
+    try {
+      await bot.api.sendMessage(Number(chatId), "✅ Тестовое уведомление: сюда будут приходить алерты об ошибках бэкапа БД.");
+      logger.info("settings.test_alert", { chat_id: chatId, ok: true });
+      res.json({ ok: true });
+    } catch (e: any) {
+      logger.warn("settings.test_alert", { chat_id: chatId, ok: false, error: e?.description ?? e?.message });
+      res.status(400).json({ error: "send_failed", description: e?.description ?? e?.message ?? "" });
+    }
   });
 
   api.get("/db-dump", requireApiAuth, (req, res) => {

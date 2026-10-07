@@ -51,6 +51,21 @@ describe("UsersListView", () => {
     expect(api.get).toHaveBeenCalledWith("/admin/users?page=1&q=");
   });
 
+  it("shows the bot chat id, or that the client has not started the bot", async () => {
+    vi.mocked(api.get).mockResolvedValue(usersPage({
+      users: [
+        { id: 1, client_code: "DIX-0001", full_name: "Иван", phone: "1", telegram_id: "434413828", created_at: "2026-01-01T00:00:00Z", packages_count: 0 },
+        { id: 2, client_code: "DIX-0002", full_name: "Пётр", phone: "2", telegram_id: "-1781587673988", created_at: "2026-01-01T00:00:00Z", packages_count: 0 },
+      ],
+      total: 2,
+    }));
+    wrapper = mount(UsersListView, globalStubs);
+    await flushPromises();
+    const cells = wrapper.findAll('[data-test="chat-id"]');
+    expect(cells[0].text()).toBe("434413828");
+    expect(cells[1].text()).toBe("не в боте");
+  });
+
   it("shows an empty state", async () => {
     vi.mocked(api.get).mockResolvedValue(usersPage());
     wrapper = mount(UsersListView, globalStubs);

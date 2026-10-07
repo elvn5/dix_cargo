@@ -3,15 +3,16 @@ import { mount } from "@vue/test-utils";
 
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();
-  return { ...actual, api: { get: vi.fn(), put: vi.fn() } };
+  return { ...actual, api: { get: vi.fn(), put: vi.fn(), post: vi.fn() } };
 });
 
 import SettingsView from "./SettingsView.vue";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 
 beforeEach(() => {
   vi.mocked(api.get).mockReset();
   vi.mocked(api.put).mockReset();
+  vi.mocked(api.post).mockReset();
 });
 
 function flushPromises() {
@@ -146,5 +147,47 @@ describe("SettingsView", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     expect(wrapper.find('a[href="/api/admin/db-dump"]').exists()).toBe(true);
+  });
+});
+
+describe("SettingsView — алерты бэкапа", () => {
+  it("shows the saved chat id and saves only that setting", async () => {
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [], backupAlertChatId: "434413828" });
+    vi.mocked(api.put).mockResolvedValue({ ok: true });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+
+    const input = wrapper.find('[data-test="alert-chat-id"]');
+    expect((input.element as HTMLInputElement).value).toBe("434413828");
+    await input.setValue(" 555 ");
+    await wrapper.find('[data-test="alert-save"]').trigger("click");
+    await flushPromises();
+
+    expect(api.put).toHaveBeenCalledWith("/admin/settings", { backup_alert_chat_id: "555" });
+    expect(wrapper.find('[data-test="alert-msg"]').text()).toContain("сохранён");
+  });
+
+  it("sends a test message and explains Telegram errors", async () => {
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [], backupAlertChatId: "1" });
+    vi.mocked(api.post).mockRejectedValue(
+      new ApiError(400, "send_failed", { error: "send_failed", description: "Bad Request: chat not found" }),
+    );
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+
+    await wrapper.find('[data-test="alert-test"]').trigger("click");
+    await flushPromises();
+
+    expect(api.post).toHaveBeenCalledWith("/admin/settings/test-alert", { chat_id: "1" });
+    const msg = wrapper.find('[data-test="alert-msg"]').text();
+    expect(msg).toContain("chat not found");
+    expect(msg).toContain("/start");
+  });
+
+  it("disables the test button when the chat id is empty", async () => {
+    vi.mocked(api.get).mockResolvedValue({ settings: {}, managers: [] });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.find('[data-test="alert-test"]').attributes("disabled")).toBeDefined();
   });
 });

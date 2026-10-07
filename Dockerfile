@@ -61,6 +61,18 @@ COPY src ./src/
 RUN npm run build
 
 # ──────────────────────────────────────────────
+# Stage: backup (ежедневные бэкапы БД в Google Drive)
+# ──────────────────────────────────────────────
+FROM alpine:3.20 AS backup
+
+RUN apk add --no-cache postgresql16-client rclone age curl tzdata
+
+COPY backup/ /backup/
+RUN chmod +x /backup/*.sh
+
+ENTRYPOINT ["/backup/entrypoint.sh"]
+
+# ──────────────────────────────────────────────
 # Stage 2: Production
 # ──────────────────────────────────────────────
 FROM node:22-alpine AS production
