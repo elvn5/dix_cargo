@@ -170,6 +170,14 @@ describe("branch selection callback", () => {
 // ── Меню-команды ─────────────────────────────────────────────────────────────
 
 describe("menu commands", () => {
+  it("/chatid replies with the chat id", async () => {
+    const bot = setupBot();
+    const handler = findHandler(bot, "command", "chatid");
+    const ctx = fakeCtx({ chat: { id: 434413828 } });
+    await handler(ctx);
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("<code>434413828</code>"), { parse_mode: "HTML" });
+  });
+
   it("/packages shows the status filter keyboard", async () => {
     const bot = setupBot();
     const handler = findHandler(bot, "command", "packages");

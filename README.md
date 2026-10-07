@@ -209,11 +209,11 @@ dix-backups/<bishkek|kant>/weekly/   — воскресные копии, 2 ме
 dix-backups/<bishkek|kant>/monthly/  — копии за 1-е число, 1 год
 ```
 
-Один бэкап делается сразу при старте сервиса — по его логу видно, что доступ к Drive работает. Ошибки пишутся в `docker logs` (событие `backup.failed`). Если задан секрет `BACKUP_ALERT_CHAT_ID`, алерт об ошибке приходит в Telegram от бота.
+Один бэкап делается сразу при старте сервиса — по его логу видно, что доступ к Drive работает. Ошибки пишутся в `docker logs` (событие `backup.failed`) и приходят в Telegram от бота в чат, указанный в админке: **Настройки бота → Алерты бэкапа** (там же кнопка тестового сообщения). Свой chat ID можно узнать командой `/chatid` в боте или в карточке клиента.
 
 **Перед каждой миграцией** бот снимает локальный дамп в том `predeploy_dumps` (`/app/backups`, последние 10 на каждую базу). Если дамп не удался, бот не стартует и миграция не применяется.
 
-Секреты в GitHub (Repository secrets): `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_TOKEN` (OAuth, scope `drive.file`), необязательный `BACKUP_ALERT_CHAT_ID`. Приватный ключ age хранится **только вне сервера** — без него бэкапы не расшифровать.
+Секреты в GitHub (Repository secrets): `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_TOKEN` (OAuth, scope `drive.file`). Приватный ключ age хранится **только вне сервера** — без него бэкапы не расшифровать.
 
 ```bash
 # Бэкап вручную (prod)

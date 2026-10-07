@@ -212,7 +212,6 @@ jobs:
             GDRIVE_CLIENT_ID=${{ secrets.GDRIVE_CLIENT_ID }}
             GDRIVE_CLIENT_SECRET=${{ secrets.GDRIVE_CLIENT_SECRET }}
             GDRIVE_TOKEN='${{ secrets.GDRIVE_TOKEN }}'
-            BACKUP_ALERT_CHAT_ID=${{ secrets.BACKUP_ALERT_CHAT_ID }}
             EOF
 
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin

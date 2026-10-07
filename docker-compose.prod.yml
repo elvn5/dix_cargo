@@ -118,9 +118,8 @@ services:
       BACKUP_KEEP_DAILY_DAYS: "14"
       BACKUP_KEEP_WEEKLY_DAYS: "62"
       BACKUP_KEEP_MONTHLY_DAYS: "365"
-      # Алерт об ошибке в Telegram (пусто — алерты выключены)
+      # Алерт об ошибке в Telegram от бота; chat ID задаётся в админке → Настройки бота
       BOT_TOKEN: ${BOT_TOKEN}
-      ALERT_CHAT_ID: ${BACKUP_ALERT_CHAT_ID:-}
 
 volumes:
   postgres_data:

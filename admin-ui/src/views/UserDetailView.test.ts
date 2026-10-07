@@ -508,3 +508,19 @@ describe("UserDetailView — trash, deliveries and duplicates", () => {
     expect(wrapper.text()).toContain("Новая посылка");
   });
 });
+
+describe("UserDetailView — chat ID", () => {
+  it("shows the bot chat id of a registered client", async () => {
+    vi.mocked(api.get).mockResolvedValue(userDetail());
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+    expect(wrapper.find('[data-test="chat-id"]').text()).toContain("555");
+  });
+
+  it("explains that a client created in the admin has no chat with the bot", async () => {
+    vi.mocked(api.get).mockResolvedValue(userDetail({ user: { ...userDetail().user, telegram_id: "-1781587673988" } }));
+    wrapper = mount(UserDetailView, globalStubs);
+    await flushPromises();
+    expect(wrapper.find('[data-test="chat-id"]').text()).toContain("ещё не писал боту");
+  });
+});

@@ -26,10 +26,20 @@ log() {
   echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"level\":\"$level\",\"event\":\"$event\"$extra}"
 }
 
+# Chat ID для алертов задаётся в админке (Настройки бота) и хранится в базе Бишкека.
+# Последнее прочитанное значение кэшируется: если база недоступна, алерт всё равно уйдёт.
+ALERT_CHAT_CACHE="${ALERT_CHAT_CACHE:-/tmp/alert_chat_id}"
+refresh_alert_chat_id() {
+  id="$(PGCONNECT_TIMEOUT=5 psql "$DATABASE_URL" -XAtc \
+    "SELECT value FROM settings WHERE key = 'backup_alert_chat_id'" 2>/dev/null)" || return 0
+  printf '%s' "$id" > "$ALERT_CHAT_CACHE"
+}
+
 alert() {
-  [ -n "${ALERT_CHAT_ID:-}" ] && [ -n "${BOT_TOKEN:-}" ] || return 0
+  chat_id="$(cat "$ALERT_CHAT_CACHE" 2>/dev/null || true)"
+  [ -n "$chat_id" ] && [ -n "${BOT_TOKEN:-}" ] || { log warn backup.alert_skipped reason=no_chat_id; return 0; }
   curl -fsS --max-time 20 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-    --data-urlencode "chat_id=${ALERT_CHAT_ID}" \
+    --data-urlencode "chat_id=${chat_id}" \
     --data-urlencode "text=⚠️ Бэкап БД не удался: $1" >/dev/null || log error backup.alert_failed
 }
 
@@ -78,6 +88,7 @@ backup_one() {
 }
 
 log info backup.start stamp="$stamp"
+refresh_alert_chat_id
 backup_one bishkek "$DATABASE_URL"
 if [ -n "${DATABASE_URL_KANT:-}" ]; then
   backup_one kant "$DATABASE_URL_KANT"

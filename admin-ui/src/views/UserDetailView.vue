@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api/client";
 import { pageTitle } from "../composables/pageTitle";
 import LoadingSpinner from "../components/LoadingSpinner.vue";
+import { botChatId } from "../utils/chatId";
 import DuplicateTrackModal from "../components/DuplicateTrackModal.vue";
 import { duplicateTrackFrom, type DuplicateTrack } from "../utils/duplicateTrack";
 
@@ -301,9 +302,13 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
         <div class="card p-6">
           <div class="text-slate-500 text-xs font-semibold uppercase mb-3">Информация</div>
           <dl class="space-y-3 text-sm">
-            <div>
-              <dt class="text-slate-400 text-xs">Telegram ID</dt>
-              <dd class="font-mono">{{ user.telegram_id }}</dd>
+            <div data-test="chat-id">
+              <dt class="text-slate-400 text-xs">Chat ID с ботом</dt>
+              <dd v-if="botChatId(user.telegram_id)" class="font-mono">{{ botChatId(user.telegram_id) }}</dd>
+              <dd v-else class="text-amber-700">
+                Нет — клиент ещё не писал боту, уведомления ему не доходят
+                <div class="text-xs text-slate-400 font-mono">служебный ID {{ user.telegram_id }}</div>
+              </dd>
             </div>
             <div>
               <dt class="text-slate-400 text-xs">Дата регистрации</dt>

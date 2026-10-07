@@ -254,6 +254,11 @@ export function registerControllers(bot: Bot<Context>): void {
   bot.command("profile", (ctx) => handleProfile(ctx));
   bot.command("support", (ctx) => handleSupport(ctx));
   bot.command("template", (ctx) => handleTemplate(ctx));
+  // Служебная команда: показывает chat ID (например, чтобы указать его в админке для алертов)
+  bot.command("chatid", async (ctx) => {
+    if (!ctx.chat) return;
+    await ctx.reply(`🆔 Chat ID этого чата: <code>${ctx.chat.id}</code>`, { parse_mode: "HTML" });
+  });
 
   // ── Callback-кнопки ───────────────────────────────────────────────────────────
   // ── Шаблоны маркетплейсов ────────────────────────────────────────────────────
