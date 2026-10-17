@@ -6,25 +6,15 @@ const EXCLUDED_CODE_NUMBERS = new Set([
   1989, 1991, 2101, 3333, 1920, 5555,
 ]);
 
-/** Ключ настройки с последним выданным номером клиентского кода. */
-export const CLIENT_CODE_SEQ_KEY = "client_code_seq";
-
-/**
- * «Красивые» коды (DIX-1111, DIX-7777 и т.п.) выдаются вручную и не входят в
- * обычную нумерацию — при первом запуске счётчик стартует с максимального
- * номера ниже этого порога.
- */
-const VANITY_CODE_THRESHOLD = 1000;
-
 function codeNumber(code: string): number {
   return parseInt(code.split("-")[1] ?? "0", 10) || 0;
 }
 
 /**
- * Следующий клиентский код. Номера только растут и никогда не переиспользуются:
- * последний выданный номер хранится в настройках, поэтому код удалённого
- * клиента не достанется новому. Занятые (в т.ч. клиентами в корзине и
- * введёнными вручную) и исключённые номера пропускаются.
+ * Следующий клиентский код — первый свободный номер начиная с 1.
+ * Занятые (в т.ч. клиентами в корзине и введёнными вручную) и исключённые
+ * номера пропускаются, поэтому вручную выданный код (например DIX-0333)
+ * не сдвигает общую нумерацию — она идёт своим чередом.
  */
 async function generateClientCode(db: PrismaClient, branch: Branch): Promise<string> {
   const prefix = clientCodePrefix(branch);
@@ -33,23 +23,8 @@ async function generateClientCode(db: PrismaClient, branch: Branch): Promise<str
   });
   const takenNumbers = new Set(allCodes.map(u => codeNumber(u.client_code)));
 
-  const seq = await db.setting.findUnique({ where: { key: CLIENT_CODE_SEQ_KEY } });
-  let last = seq ? parseInt(seq.value, 10) || 0 : 0;
-  if (!seq) {
-    for (const n of takenNumbers) {
-      if (n < VANITY_CODE_THRESHOLD && n > last) last = n;
-    }
-  }
-
-  let next = last + 1;
+  let next = 1;
   while (EXCLUDED_CODE_NUMBERS.has(next) || takenNumbers.has(next)) next++;
-
-  // Резервируем номер сразу: даже если создание клиента сорвётся, номер не вернётся в оборот
-  await db.setting.upsert({
-    where: { key: CLIENT_CODE_SEQ_KEY },
-    update: { value: String(next) },
-    create: { key: CLIENT_CODE_SEQ_KEY, value: String(next) },
-  });
 
   return `${prefix}-${String(next).padStart(4, "0")}`;
 }
