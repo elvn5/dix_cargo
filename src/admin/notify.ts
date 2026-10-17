@@ -39,6 +39,38 @@ export async function notifyStatusChange(
   }
 }
 
+// Сколько трек-номеров перечислять в одном сообщении — чтобы не выйти за лимит Telegram (4096).
+const MAX_TRACKS_IN_MESSAGE = 50;
+
+/**
+ * Уведомление после импорта: все посылки клиента из файла — одним сообщением.
+ * Для клиента без привязанного Telegram (telegram_id <= 0) ничего не шлём.
+ * Возвращает true, если сообщение ушло.
+ */
+export async function notifyInTransit(
+  bot: Bot<Context>,
+  telegramId: bigint,
+  clientCode: string,
+  trackCodes: string[],
+): Promise<boolean> {
+  if (!(telegramId > 0n) || trackCodes.length === 0) return false;
+  try {
+    const shown = trackCodes.slice(0, MAX_TRACKS_IN_MESSAGE);
+    const rest  = trackCodes.length - shown.length;
+    const trackList = shown.map(t => `• <code>${t}</code>`).join("\n") + (rest > 0 ? `\n…и ещё ${rest}` : "");
+
+    const text = trackCodes.length === 1
+      ? `🚚 Ваша посылка в пути!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номер: <b>${trackCodes[0]}</b>\n\nМы сообщим, когда она прибудет в офис.`
+      : `🚚 ${trackCodes.length} посылок в пути!\n\n🪪 Код клиента: <b>${clientCode}</b>\n📬 Трек-номера:\n${trackList}\n\nМы сообщим, когда они прибудут в офис.`;
+
+    await bot.api.sendMessage(Number(telegramId), text, { parse_mode: "HTML" });
+    return true;
+  } catch (err) {
+    logger.error("notify.in_transit_failed", { telegram_id: telegramId, client_code: clientCode, error: err });
+    return false;
+  }
+}
+
 export async function notifyResetDecision(bot: Bot<Context>, telegramId: bigint, approved: boolean) {
   try {
     const text = approved

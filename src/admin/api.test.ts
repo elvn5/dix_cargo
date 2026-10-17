@@ -1148,6 +1148,60 @@ describe("POST /packages/import", () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 
+  it("notifies each client once with all their in-transit packages", async () => {
+    const users: Record<string, any> = {
+      "DIX-0001": { id: 1, client_code: "DIX-0001", telegram_id: 111n },
+      "DIX-0002": { id: 2, client_code: "DIX-0002", telegram_id: -5n }, // не привязан к Telegram
+      "DIX-0003": { id: 3, client_code: "DIX-0003", telegram_id: 333n },
+    };
+    const db = fakeDb({
+      user: { findUnique: vi.fn(async ({ where }: any) => users[where.client_code] ?? null) },
+      package: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+
+    const rows = [
+      ["", "", "DIX-0001", "TRACK1"],
+      ["", "", "DIX-0002", "TRACK2"],
+      ["", "", "DIX-0001", "TRACK3"],
+      ["", "", "DIX-0003", "TRACK4"],
+    ];
+
+    const bot = fakeBot();
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    const res = await agent
+      .post("/api/admin/packages/import")
+      .attach("file", xlsxBuffer(rows), "import.xlsx");
+    expect(res.body.imported).toBe(4);
+
+    await vi.waitFor(() => expect(bot.api.sendMessage).toHaveBeenCalledTimes(2));
+    const calls = (bot.api.sendMessage as any).mock.calls;
+    expect(calls[0][0]).toBe(111);
+    expect(calls[0][1]).toContain("2 посылок в пути");
+    expect(calls[0][1]).toContain("TRACK1");
+    expect(calls[0][1]).toContain("TRACK3");
+    expect(calls[1][0]).toBe(333);
+    expect(calls[1][1]).toContain("Ваша посылка в пути");
+    expect(calls[1][1]).toContain("TRACK4");
+  });
+
+  it("does not notify anyone on dryRun", async () => {
+    const db = fakeDb({
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 1, client_code: "DIX-0001", telegram_id: 111n }) },
+      package: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    getPrismaMock.mockReturnValue(db);
+    const bot = fakeBot();
+    const app = buildApp(bot);
+    const agent = await loginAgent(app);
+    await agent
+      .post("/api/admin/packages/import?dryRun=1")
+      .attach("file", xlsxBuffer([["", "", "DIX-0001", "TRACK1"]]), "import.xlsx");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(bot.api.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("dryRun=1 returns a preview plan and writes nothing", async () => {
     const db = fakeDb({
       user: {

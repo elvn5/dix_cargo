@@ -14,7 +14,7 @@ import { parseShippingDate } from "../utils/parseShippingDate";
 import { DEFAULT_SUPPORT_TEXT } from "../utils/supportText";
 import { DEFAULT_ADDRESSES_TEXT } from "../utils/addressesText";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, APP_VERSION, IS_STAGING, getBranch, requireApiAuth } from "./auth";
-import { notifyStatusChange, notifyResetDecision } from "./notify";
+import { notifyStatusChange, notifyResetDecision, notifyInTransit } from "./notify";
 import { logger } from "../utils/logger";
 import { sanitizeTelegramHtml, plainTextLength, sendBroadcast, TG_MESSAGE_LIMIT, type BroadcastFile } from "./broadcast";
 
@@ -675,9 +675,11 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     action: "import" | "skip";
     reason?: "user_not_found" | "duplicate";
     userId?: number;
+    telegramId?: bigint;
   };
 
   const MAX_PREVIEW_ITEMS = 500;
+  const IMPORT_NOTIFY_DELAY_MS = 40;
 
   api.post("/packages/import", requireApiAuth, importUpload.single("file"), async (req, res) => {
     const branch = getBranch(req);
@@ -718,7 +720,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       if (exists) { items.push({ clientCode, trackCode, userName: user.full_name ?? null, action: "skip", reason: "duplicate" }); continue; }
 
       planned.add(dupKey);
-      items.push({ clientCode, trackCode, userName: user.full_name ?? null, action: "import", userId: user.id });
+      items.push({ clientCode, trackCode, userName: user.full_name ?? null, action: "import", userId: user.id, telegramId: user.telegram_id });
     }
 
     const importItems = items.filter((i) => i.action === "import");
@@ -728,7 +730,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
       .filter((i) => i.reason === "user_not_found")
       .map((i) => `${i.clientCode}: пользователь не найден`);
     // Публичная форма плана — без внутреннего userId.
-    const previewItems = items.slice(0, MAX_PREVIEW_ITEMS).map(({ userId: _userId, ...rest }) => rest);
+    const previewItems = items.slice(0, MAX_PREVIEW_ITEMS).map(({ userId: _userId, telegramId: _telegramId, ...rest }) => rest);
     const summary = {
       shippingDate: shippingDate.toISOString(),
       toImport,
@@ -759,7 +761,32 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     });
 
     res.json({ dryRun: false, imported, skipped: toSkip, ...summary });
+
+    // Уведомляем клиентов уже после ответа, чтобы админка не ждала рассылку.
+    void notifyImportedInTransit(bot, branch, importItems);
   });
+
+  // Каждому клиенту — одно сообщение со всеми его посылками из файла (статус «В пути»).
+  async function notifyImportedInTransit(bot: Bot<Context>, branch: string, importItems: ImportPlanItem[]) {
+    const byUser = new Map<number, { telegramId: bigint; clientCode: string; tracks: string[] }>();
+    for (const it of importItems) {
+      if (typeof it.telegramId !== "bigint") continue;
+      const entry = byUser.get(it.userId!) ?? { telegramId: it.telegramId, clientCode: it.clientCode, tracks: [] };
+      entry.tracks.push(it.trackCode);
+      byUser.set(it.userId!, entry);
+    }
+
+    let sent = 0;
+    let first = true;
+    for (const { telegramId, clientCode, tracks } of byUser.values()) {
+      if (!(telegramId > 0n)) continue;
+      // Пауза между клиентами, чтобы не упереться в лимиты Telegram (~30 msg/s).
+      if (!first) await new Promise((r) => setTimeout(r, IMPORT_NOTIFY_DELAY_MS));
+      first = false;
+      if (await notifyInTransit(bot, telegramId, clientCode, tracks)) sent++;
+    }
+    logger.info("packages.import_notified", { branch, users: byUser.size, sent });
+  }
 
   api.get("/packages/:id", requireApiAuth, async (req, res) => {
     const db = getPrisma(getBranch(req));

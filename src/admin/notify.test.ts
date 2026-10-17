@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PrismaClient, User } from "@prisma/client";
 import type { Bot, Context } from "grammy";
-import { notifyStatusChange, notifyResetDecision } from "./notify";
+import { notifyStatusChange, notifyResetDecision, notifyInTransit } from "./notify";
 
 function fakeDb(user: Partial<User> | null) {
   return {
@@ -96,6 +96,42 @@ describe("notifyStatusChange", () => {
     await expect(
       notifyStatusChange(bot, db, 1, "DIX-0001", ["TRACK1"], "IN_OFFICE")
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("notifyInTransit", () => {
+  it("skips users not linked to Telegram", async () => {
+    const bot = fakeBot();
+    expect(await notifyInTransit(bot, -1n, "DIX-0001", ["T1"])).toBe(false);
+    expect(bot.api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends all tracks in one message", async () => {
+    const bot = fakeBot();
+    expect(await notifyInTransit(bot, 555n, "DIX-0001", ["T1", "T2"])).toBe(true);
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+    const [chatId, text, opts] = (bot.api.sendMessage as any).mock.calls[0];
+    expect(chatId).toBe(555);
+    expect(text).toContain("2 посылок в пути");
+    expect(text).toContain("T1");
+    expect(text).toContain("T2");
+    expect(opts).toEqual({ parse_mode: "HTML" });
+  });
+
+  it("caps the track list to stay within Telegram limits", async () => {
+    const bot = fakeBot();
+    const tracks = Array.from({ length: 60 }, (_, i) => `TRACK${i}`);
+    await notifyInTransit(bot, 555n, "DIX-0001", tracks);
+    const [, text] = (bot.api.sendMessage as any).mock.calls[0];
+    expect(text).toContain("60 посылок в пути");
+    expect(text).toContain("…и ещё 10");
+    expect(text).not.toContain("TRACK55");
+  });
+
+  it("returns false when Telegram rejects the message", async () => {
+    const bot = fakeBot();
+    (bot.api.sendMessage as any).mockRejectedValueOnce(new Error("blocked"));
+    expect(await notifyInTransit(bot, 555n, "DIX-0001", ["T1"])).toBe(false);
   });
 });
 
