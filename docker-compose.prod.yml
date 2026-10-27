@@ -93,7 +93,7 @@ services:
       - app_logs:/app/logs
       - predeploy_dumps:/app/backups
 
-  # Ежедневный зашифрованный бэкап обеих баз в Google Drive (backup/backup.sh).
+  # Ежедневный зашифрованный бэкап обеих баз в S3-бакет, по умолчанию Cloudflare R2 (backup/backup.sh).
   # Включается профилем: COMPOSE_PROFILES=backup в .env (сейчас только прод).
   backup:
     image: ${BACKUP_IMAGE:-ghcr.io/elvn5/dix_cargo:backup-latest}
@@ -110,9 +110,12 @@ services:
       BACKUP_TIME: "03:00"
       DATABASE_URL: ${DATABASE_URL}
       DATABASE_URL_KANT: ${DATABASE_URL_KANT}
-      GDRIVE_CLIENT_ID: ${GDRIVE_CLIENT_ID:-}
-      GDRIVE_CLIENT_SECRET: ${GDRIVE_CLIENT_SECRET:-}
-      GDRIVE_TOKEN: ${GDRIVE_TOKEN:-}
+      S3_PROVIDER: ${S3_PROVIDER:-Cloudflare}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       # Публичный ключ age: расшифровать бэкап можно только приватным ключом, которого нет на сервере
       BACKUP_AGE_RECIPIENT: age1tdwr3ewn5h73x9p9x2qldprv4sk0hnm3dm3lagd42280r060n4qqzk3dz8
       BACKUP_KEEP_DAILY_DAYS: "14"

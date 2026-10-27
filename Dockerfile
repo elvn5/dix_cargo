@@ -61,7 +61,7 @@ COPY src ./src/
 RUN npm run build
 
 # ──────────────────────────────────────────────
-# Stage: backup (ежедневные бэкапы БД в Google Drive)
+# Stage: backup (ежедневные бэкапы БД в S3-бакет)
 # ──────────────────────────────────────────────
 FROM alpine:3.20 AS backup
 

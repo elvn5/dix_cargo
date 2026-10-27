@@ -201,25 +201,31 @@ Docker-логи контейнеров (stdout) ротируются: до 10 ф
 
 ### Бэкапы БД
 
-**Ежедневно в Google Drive** (только прод). Сервис `backup` в `docker-compose.prod.yml` каждый день в 03:00 по Бишкеку снимает `pg_dump` обеих баз, шифрует их публичным ключом [age](https://github.com/FiloSottile/age) и загружает в Drive:
+**Ежедневно в S3-бакет** (только прод). Сервис `backup` в `docker-compose.prod.yml` каждый день в 03:00 по Бишкеку снимает `pg_dump` обеих баз, шифрует их публичным ключом [age](https://github.com/FiloSottile/age) и загружает в бакет [Cloudflare R2](https://developers.cloudflare.com/r2/) (бесплатно 10 ГБ, скачивание тоже бесплатно):
 
 ```
-dix-backups/<bishkek|kant>/daily/    — 14 дней
-dix-backups/<bishkek|kant>/weekly/   — воскресные копии, 2 месяца
-dix-backups/<bishkek|kant>/monthly/  — копии за 1-е число, 1 год
+<bishkek|kant>/daily/    — 14 дней
+<bishkek|kant>/weekly/   — воскресные копии, 2 месяца
+<bishkek|kant>/monthly/  — копии за 1-е число, 1 год
 ```
 
-Один бэкап делается сразу при старте сервиса — по его логу видно, что доступ к Drive работает. Ошибки пишутся в `docker logs` (событие `backup.failed`) и приходят в Telegram от бота в чат, указанный в админке: **Настройки бота → Алерты бэкапа** (там же кнопка тестового сообщения). Свой chat ID можно узнать командой `/chatid` в боте или в карточке клиента.
+Один бэкап делается сразу при старте сервиса — по его логу видно, что доступ к бакету работает. Ошибки пишутся в `docker logs` (событие `backup.failed`) и приходят в Telegram от бота в чат, указанный в админке: **Настройки бота → Алерты бэкапа** (там же кнопка тестового сообщения). Свой chat ID можно узнать командой `/chatid` в боте или в карточке клиента.
 
 **Перед каждой миграцией** бот снимает локальный дамп в том `predeploy_dumps` (`/app/backups`, последние 10 на каждую базу). Если дамп не удался, бот не стартует и миграция не применяется.
 
-Секреты в GitHub (Repository secrets): `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_TOKEN` (OAuth, scope `drive.file`). Приватный ключ age хранится **только вне сервера** — без него бэкапы не расшифровать.
+Настройка R2 (один раз):
+
+1. Cloudflare Dashboard → **R2 Object Storage** → **Create bucket**, например `dix-backups` (нужна привязанная карта, но в пределах 10 ГБ/мес ничего не списывается).
+2. **R2 → Manage API tokens → Create API token**: права **Object Read & Write**, доступ только к бакету `dix-backups`.
+3. Из ответа взять `Access Key ID`, `Secret Access Key` и endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+
+Секреты в GitHub (Repository secrets): `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Подойдёт и другой S3-совместимый бакет (Backblaze B2 и т.п.) — дополнительно задайте `S3_PROVIDER` и `S3_REGION` в `.env` на сервере. Приватный ключ age хранится **только вне сервера** — без него бэкапы не расшифровать.
 
 ```bash
 # Бэкап вручную (prod)
 docker compose -p cargo_prod -f docker-compose.prod.yml exec backup /backup/backup.sh
 
-# Восстановление: скачать файл из Drive, расшифровать приватным ключом и залить в пустую базу
+# Восстановление: скачать файл из бакета (R2 → Objects → Download), расшифровать приватным ключом и залить в пустую базу
 age -d -i ~/dix-backup-key.txt bishkek_2026-10-07_0300.dump.age > bishkek.dump
 pg_restore --no-owner --clean --if-exists -d "postgresql://…" bishkek.dump
 

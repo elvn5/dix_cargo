@@ -1,19 +1,24 @@
 #!/bin/sh
 # Сервис бэкапов: собирает конфиг rclone из секретов и раз в сутки запускает backup.sh.
+#
+# Хранилище — любой S3-совместимый бакет. По умолчанию Cloudflare R2 (бесплатно 10 ГБ, без платы за трафик);
+# для Backblaze B2 и других — свои S3_PROVIDER (имя провайдера в rclone или Other), S3_ENDPOINT и S3_REGION.
 set -eu
 
-: "${GDRIVE_CLIENT_ID:?}" "${GDRIVE_CLIENT_SECRET:?}" "${GDRIVE_TOKEN:?}"
+: "${S3_ENDPOINT:?}" "${S3_BUCKET:?}" "${S3_ACCESS_KEY_ID:?}" "${S3_SECRET_ACCESS_KEY:?}"
 export RCLONE_CONFIG=/tmp/rclone.conf
 
-# rclone сам обновляет access token по refresh token и перезаписывает конфиг — поэтому файл в /tmp
+# no_check_bucket: токену R2 с доступом к одному бакету нельзя создавать и проверять бакеты
 umask 077
 cat > "$RCLONE_CONFIG" <<CONF
-[gdrive]
-type = drive
-client_id = ${GDRIVE_CLIENT_ID}
-client_secret = ${GDRIVE_CLIENT_SECRET}
-scope = drive.file
-token = ${GDRIVE_TOKEN}
+[s3]
+type = s3
+provider = ${S3_PROVIDER:-Cloudflare}
+access_key_id = ${S3_ACCESS_KEY_ID}
+secret_access_key = ${S3_SECRET_ACCESS_KEY}
+endpoint = ${S3_ENDPOINT}
+region = ${S3_REGION:-auto}
+no_check_bucket = true
 CONF
 
 # Ручной запуск: docker compose exec backup /backup/backup.sh
@@ -23,7 +28,7 @@ fi
 
 BACKUP_TIME="${BACKUP_TIME:-03:00}"   # по часовому поясу TZ
 
-# Сразу после старта — один бэкап: проверка, что доступ к Drive работает
+# Сразу после старта — один бэкап: проверка, что доступ к бакету работает
 if [ "${BACKUP_ON_START:-1}" = "1" ]; then
   /backup/backup.sh || true
 fi

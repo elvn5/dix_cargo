@@ -1,22 +1,21 @@
 #!/bin/sh
-# Дамп обеих баз → шифрование age → загрузка в Google Drive → очистка старых копий.
+# Дамп обеих баз → шифрование age → загрузка в S3-бакет → очистка старых копий.
 #
-# Структура в Drive (папку создаёт сам rclone — со scope drive.file он видит только свои файлы):
-#   dix-backups/<филиал>/daily/    — каждый день,      хранится BACKUP_KEEP_DAILY_DAYS
-#   dix-backups/<филиал>/weekly/   — по воскресеньям,  хранится BACKUP_KEEP_WEEKLY_DAYS
-#   dix-backups/<филиал>/monthly/  — 1-го числа,       хранится BACKUP_KEEP_MONTHLY_DAYS
+# Структура в бакете S3_BUCKET:
+#   <филиал>/daily/    — каждый день,      хранится BACKUP_KEEP_DAILY_DAYS
+#   <филиал>/weekly/   — по воскресеньям,  хранится BACKUP_KEEP_WEEKLY_DAYS
+#   <филиал>/monthly/  — 1-го числа,       хранится BACKUP_KEEP_MONTHLY_DAYS
 set -eu
 set -o pipefail
 
 : "${DATABASE_URL:?}" "${BACKUP_AGE_RECIPIENT:?}"
-REMOTE="${BACKUP_REMOTE:-gdrive:dix-backups}"
+REMOTE="${BACKUP_REMOTE:-s3:${S3_BUCKET:?}}"
 WORK_DIR="${BACKUP_WORK_DIR:-/tmp/backup}"
 KEEP_DAILY="${BACKUP_KEEP_DAILY_DAYS:-14}"
 KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY_DAYS:-62}"
 KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY_DAYS:-365}"
 
-# Удаляем навсегда, а не в корзину Drive — иначе удалённые копии продолжают занимать место
-RCLONE="rclone --config ${RCLONE_CONFIG:-/tmp/rclone.conf} --drive-use-trash=false --retries 5 --low-level-retries 10"
+RCLONE="rclone --config ${RCLONE_CONFIG:-/tmp/rclone.conf} --retries 5 --low-level-retries 10"
 
 # JSON-строка в том же формате, что и журнал бота
 log() {
@@ -70,7 +69,7 @@ backup_one() {
 
   STAGE="upload:$branch"
   $RCLONE copyto "$file" "$REMOTE/$branch/daily/$(basename "$file")"
-  # Недельные и месячные копии — копирование внутри Drive, без повторной загрузки
+  # Недельные и месячные копии — копирование внутри бакета, без повторной загрузки
   if [ "$dow" = "7" ]; then
     $RCLONE copyto "$REMOTE/$branch/daily/$(basename "$file")" "$REMOTE/$branch/weekly/$(basename "$file")"
   fi
