@@ -201,7 +201,7 @@ Docker-логи контейнеров (stdout) ротируются: до 10 ф
 
 ### Бэкапы БД
 
-**Ежедневно в S3-бакет** (только прод). Сервис `backup` в `docker-compose.prod.yml` каждый день в 03:00 по Бишкеку снимает `pg_dump` обеих баз, шифрует их публичным ключом [age](https://github.com/FiloSottile/age) и загружает в бакет [Cloudflare R2](https://developers.cloudflare.com/r2/) (бесплатно 10 ГБ, скачивание тоже бесплатно):
+**Ежедневно в S3-бакет** (только прод). Сервис `backup` в `docker-compose.prod.yml` каждый день в 03:00 по Бишкеку снимает `pg_dump` обеих баз (формат custom, без шифрования) и загружает в бакет [Cloudflare R2](https://developers.cloudflare.com/r2/) (бесплатно 10 ГБ, скачивание тоже бесплатно):
 
 ```
 <bishkek|kant>/daily/    — 14 дней
@@ -219,15 +219,14 @@ Docker-логи контейнеров (stdout) ротируются: до 10 ф
 2. **R2 → Manage API tokens → Create API token**: права **Object Read & Write**, доступ только к бакету `dix-backups`.
 3. Из ответа взять `Access Key ID`, `Secret Access Key` и endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
 
-Секреты в GitHub (Repository secrets): `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Подойдёт и другой S3-совместимый бакет (Backblaze B2 и т.п.) — дополнительно задайте `S3_PROVIDER` и `S3_REGION` в `.env` на сервере. Приватный ключ age хранится **только вне сервера** — без него бэкапы не расшифровать.
+Секреты в GitHub (Repository secrets): `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Подойдёт и другой S3-совместимый бакет (Backblaze B2 и т.п.) — дополнительно задайте `S3_PROVIDER` и `S3_REGION` в `.env` на сервере. Дампы не зашифрованы: бакет должен оставаться приватным, а ключ доступа — только с правами на этот бакет. Старые файлы `*.dump.age` (до отключения шифрования) расшифровываются приватным ключом age: `age -d -i ~/dix-backup-key.txt файл.dump.age > файл.dump`.
 
 ```bash
 # Бэкап вручную (prod)
 docker compose -p cargo_prod -f docker-compose.prod.yml exec backup /backup/backup.sh
 
-# Восстановление: скачать файл из бакета (R2 → Objects → Download), расшифровать приватным ключом и залить в пустую базу
-age -d -i ~/dix-backup-key.txt bishkek_2026-10-07_0300.dump.age > bishkek.dump
-pg_restore --no-owner --clean --if-exists -d "postgresql://…" bishkek.dump
+# Восстановление: скачать файл из бакета (R2 → Objects → Download) и залить в пустую базу
+pg_restore --no-owner --clean --if-exists -d "postgresql://…" bishkek_2026-10-27_0300.dump
 
 # Откат на дамп перед миграцией (prod, Бишкек)
 docker exec cargo_prod-bot-1 ls -t /app/backups

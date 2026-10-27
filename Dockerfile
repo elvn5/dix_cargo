@@ -65,7 +65,7 @@ RUN npm run build
 # ──────────────────────────────────────────────
 FROM alpine:3.20 AS backup
 
-RUN apk add --no-cache postgresql16-client rclone age curl tzdata
+RUN apk add --no-cache postgresql16-client rclone curl tzdata
 
 COPY backup/ /backup/
 RUN chmod +x /backup/*.sh

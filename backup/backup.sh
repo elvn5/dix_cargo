@@ -1,5 +1,5 @@
 #!/bin/sh
-# Дамп обеих баз → шифрование age → загрузка в S3-бакет → очистка старых копий.
+# Дамп обеих баз (pg_dump custom, уже сжатый) → загрузка в S3-бакет → очистка старых копий.
 #
 # Структура в бакете S3_BUCKET:
 #   <филиал>/daily/    — каждый день,      хранится BACKUP_KEEP_DAILY_DAYS
@@ -8,7 +8,7 @@
 set -eu
 set -o pipefail
 
-: "${DATABASE_URL:?}" "${BACKUP_AGE_RECIPIENT:?}"
+: "${DATABASE_URL:?}"
 REMOTE="${BACKUP_REMOTE:-s3:${S3_BUCKET:?}}"
 WORK_DIR="${BACKUP_WORK_DIR:-/tmp/backup}"
 KEEP_DAILY="${BACKUP_KEEP_DAILY_DAYS:-14}"
@@ -60,10 +60,10 @@ dom="$(date +%d)"
 
 backup_one() {
   branch="$1"; url="$2"
-  file="$WORK_DIR/${branch}_${stamp}.dump.age"
+  file="$WORK_DIR/${branch}_${stamp}.dump"
 
   STAGE="dump:$branch"
-  pg_dump --format=custom --no-owner --no-privileges "$url" | age --encrypt -r "$BACKUP_AGE_RECIPIENT" > "$file"
+  pg_dump --format=custom --no-owner --no-privileges --file="$file" "$url"
   size="$(wc -c < "$file" | tr -d ' ')"
   [ "$size" -gt 200 ] || { log error backup.too_small branch="$branch" bytes="$size"; return 1; }
 
