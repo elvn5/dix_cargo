@@ -5,7 +5,22 @@
 # для Backblaze B2 и других — свои S3_PROVIDER (имя провайдера в rclone или Other), S3_ENDPOINT и S3_REGION.
 set -eu
 
-: "${S3_ENDPOINT:?}" "${S3_BUCKET:?}" "${S3_ACCESS_KEY_ID:?}" "${S3_SECRET_ACCESS_KEY:?}"
+# Без настроек S3 бэкап не запустится: сообщаем в Telegram и ждём, а не уходим в цикл перезапусков
+missing=""
+for v in S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY; do
+  eval "[ -n \"\${$v:-}\" ]" || missing="$missing $v"
+done
+if [ -n "$missing" ]; then
+  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"level\":\"error\",\"event\":\"backup.misconfigured\",\"missing\":\"${missing# }\"}"
+  chat_id="$(PGCONNECT_TIMEOUT=5 psql "${DATABASE_URL:-}" -XAtc \
+    "SELECT value FROM settings WHERE key = 'backup_alert_chat_id'" 2>/dev/null || true)"
+  if [ -n "$chat_id" ] && [ -n "${BOT_TOKEN:-}" ]; then
+    curl -fsS --max-time 20 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+      --data-urlencode "chat_id=${chat_id}" \
+      --data-urlencode "text=⚠️ Бэкапы БД не работают: не заданы переменные${missing}" >/dev/null || true
+  fi
+  exec sleep infinity
+fi
 export RCLONE_CONFIG=/tmp/rclone.conf
 
 # no_check_bucket: токену R2 с доступом к одному бакету нельзя создавать и проверять бакеты

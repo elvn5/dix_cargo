@@ -970,7 +970,7 @@ export function registerApiRoutes(app: express.Express, bot: Bot<Context>): void
     const chatId = String((req.body as { chat_id?: unknown }).chat_id ?? "").trim();
     if (!isChatId(chatId)) return res.status(400).json({ error: "invalid_chat_id" });
     try {
-      await bot.api.sendMessage(Number(chatId), "✅ Тестовое уведомление: сюда будут приходить алерты об ошибках бэкапа БД.");
+      await bot.api.sendMessage(Number(chatId), "✅ Тестовое уведомление: сюда будут приходить отчёты и алерты о бэкапах БД.");
       logger.info("settings.test_alert", { chat_id: chatId, ok: true });
       res.json({ ok: true });
     } catch (e: any) {

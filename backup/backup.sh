@@ -34,13 +34,21 @@ refresh_alert_chat_id() {
   printf '%s' "$id" > "$ALERT_CHAT_CACHE"
 }
 
-alert() {
+notify() {
   chat_id="$(cat "$ALERT_CHAT_CACHE" 2>/dev/null || true)"
-  [ -n "$chat_id" ] && [ -n "${BOT_TOKEN:-}" ] || { log warn backup.alert_skipped reason=no_chat_id; return 0; }
+  [ -n "${BOT_TOKEN:-}" ] || { log warn backup.notify_skipped reason=no_bot_token; return 0; }
+  [ -n "$chat_id" ] || { log warn backup.notify_skipped reason=no_chat_id; return 0; }
   curl -fsS --max-time 20 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${chat_id}" \
-    --data-urlencode "text=⚠️ Бэкап БД не удался: $1" >/dev/null || log error backup.alert_failed
+    --data-urlencode "text=$1" >/dev/null || log error backup.notify_failed
 }
+
+alert() { notify "⚠️ Бэкап БД не удался: $1"; }
+
+# Размер в МБ с одним знаком после запятой
+human_size() { awk -v b="$1" 'BEGIN { printf "%.1f МБ", b / 1048576 }'; }
+
+REPORT=""
 
 STAGE="start"
 on_exit() {
@@ -83,6 +91,8 @@ backup_one() {
   $RCLONE delete --min-age "${KEEP_MONTHLY}d" "$REMOTE/$branch/monthly" 2>/dev/null || true
 
   log info backup.uploaded branch="$branch" file="$(basename "$file")" bytes="$size"
+  REPORT="${REPORT}
+• ${branch}: $(human_size "$size")"
   rm -f "$file"
 }
 
@@ -94,3 +104,4 @@ if [ -n "${DATABASE_URL_KANT:-}" ]; then
 fi
 STAGE="done"
 log info backup.done stamp="$stamp"
+notify "✅ Бэкап БД выполнен ($stamp)${REPORT}"
